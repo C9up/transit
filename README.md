@@ -1,0 +1,91 @@
+# @c9up/transit
+
+> Federated sign-in for the Ream framework — everything that lets a person
+> prove who they are through an authority your application does not own.
+
+Today: OAuth1, OAuth2, and the providers that speak them. The package exists so
+that OpenID Connect, SAML and directory lookups can join them without inflating
+the authentication package.
+
+Part of **[Ream](https://github.com/C9up/ream)**. Independent, publishable
+package — it imports nothing from the rest of the framework.
+
+## Installation
+
+```bash
+pnpm add @c9up/transit
+```
+
+```ts
+// reamrc.ts
+providers: [
+  () => import('@c9up/transit/provider'),
+]
+```
+
+## Configuration
+
+```ts
+// config/transit.ts
+import { defineConfig, socials } from '@c9up/transit'
+
+export default defineConfig({
+  google: socials.google({
+    clientId: env.get('GOOGLE_CLIENT_ID'),
+    clientSecret: env.get('GOOGLE_CLIENT_SECRET'),
+    callbackUrl: 'https://acme.test/auth/google/callback',
+  }),
+})
+```
+
+The keys are yours: two entries may reach the same provider with different
+credentials, and `use(name)` asks for the key.
+
+## The round trip
+
+```ts
+import transit from '@c9up/transit/services/main'
+
+// Send the user off
+const { url, state, secret } = await transit.begin('google')
+ctx.session.put('transit_state', state)
+ctx.session.put('transit_secret', secret)
+return ctx.response.redirect(url)
+
+// ... and receive them back
+const { user, token } = await transit.callback(
+  'google',
+  ctx.request.input('code'),
+  ctx.request.input('state'),
+  ctx.session.pull('transit_state'),
+  ctx.session.pull('transit_secret'),
+)
+```
+
+`begin()` works for every provider. `secret` is `undefined` for a plain OAuth2
+provider, the PKCE verifier for one that mandates it, and the request-token
+secret for OAuth1 — storing and returning it unconditionally is what lets one
+controller serve all three.
+
+## Providers
+
+`socials.discord`, `.facebook`, `.github`, `.google`, `.linkedin`,
+`.linkedinOpenidConnect`, `.spotify`, `.twitter` (OAuth1), `.twitterX` (OAuth2).
+
+## Before linking an account by email
+
+`user.emailVerificationState` is `verified`, `unverified` or `unsupported`.
+Only the first may be trusted to match an existing account: `unverified` means
+anyone able to type that address at the provider now holds it, and
+`unsupported` means the provider says nothing either way.
+
+## Entry points
+
+- `@c9up/transit` — main API
+- `@c9up/transit/config` — `defineConfig`, `socials`
+- `@c9up/transit/provider` — Ream IoC provider
+- `@c9up/transit/services/main` — container service accessor
+
+## License
+
+MIT

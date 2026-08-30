@@ -1,0 +1,87 @@
+/**
+ * Author-time config for `config/transit.ts`.
+ *
+ *   import { defineConfig, socials } from '@c9up/transit'
+ *
+ *   export default defineConfig({
+ *     google: socials.google({
+ *       clientId: env.get('GOOGLE_CLIENT_ID'),
+ *       clientSecret: env.get('GOOGLE_CLIENT_SECRET'),
+ *       callbackUrl: 'https://acme.test/auth/google/callback',
+ *     }),
+ *   })
+ *
+ * The keys are yours. Two entries may reach the same provider with different
+ * credentials — a `staff` sign-in and a `customers` one, both on Google — and
+ * `use(name)` asks for the key, not for the provider.
+ */
+
+import { DiscordDriver } from "./drivers/DiscordDriver.js";
+import { FacebookDriver } from "./drivers/FacebookDriver.js";
+import { GitHubDriver } from "./drivers/GitHubDriver.js";
+import { GoogleDriver } from "./drivers/GoogleDriver.js";
+import { LinkedInDriver } from "./drivers/LinkedInDriver.js";
+import { LinkedInOpenidConnectDriver } from "./drivers/LinkedInOpenidConnectDriver.js";
+import { SpotifyDriver } from "./drivers/SpotifyDriver.js";
+import { TwitterDriver } from "./drivers/TwitterDriver.js";
+import { TwitterXDriver } from "./drivers/TwitterXDriver.js";
+import type { OAuthConfig, TransitDriver } from "./types.js";
+
+/** A provider, built when the manager is. */
+export type TransitDriverFactory = () => TransitDriver;
+
+/** One declared provider: the driver itself, or a factory answering one. */
+export type TransitProviderEntry = TransitDriver | TransitDriverFactory;
+
+export type TransitConfig = Record<string, TransitProviderEntry>;
+
+export function defineConfig<T extends TransitConfig>(config: T): T {
+	return config;
+}
+
+/**
+ * The social providers Transit speaks to.
+ *
+ * Factories are lazy, so a config naming a provider this environment never
+ * selects costs nothing to declare.
+ */
+export const socials = {
+	discord(config: OAuthConfig): TransitDriverFactory {
+		return () => new DiscordDriver(config);
+	},
+	facebook(config: OAuthConfig): TransitDriverFactory {
+		return () => new FacebookDriver(config);
+	},
+	github(config: OAuthConfig): TransitDriverFactory {
+		return () => new GitHubDriver(config);
+	},
+	google(config: OAuthConfig): TransitDriverFactory {
+		return () => new GoogleDriver(config);
+	},
+	/**
+	 * LinkedIn through the member API, for an application whose LinkedIn app
+	 * holds `r_liteprofile` / `r_emailaddress`.
+	 */
+	linkedin(config: OAuthConfig): TransitDriverFactory {
+		return () => new LinkedInDriver(config);
+	},
+	/** LinkedIn through OpenID Connect — what a new application is issued. */
+	linkedinOpenidConnect(config: OAuthConfig): TransitDriverFactory {
+		return () => new LinkedInOpenidConnectDriver(config);
+	},
+	spotify(config: OAuthConfig): TransitDriverFactory {
+		return () => new SpotifyDriver(config);
+	},
+	/**
+	 * X through OAuth1 — the older flow, and the one whose profile call returns
+	 * the address. Its redirect needs a request token from X, so it is reached
+	 * through `begin()` rather than `redirect()`.
+	 */
+	twitter(config: OAuthConfig): TransitDriverFactory {
+		return () => new TwitterDriver(config);
+	},
+	/** X through OAuth2. It requires PKCE, which `begin()` handles. */
+	twitterX(config: OAuthConfig): TransitDriverFactory {
+		return () => new TwitterXDriver(config);
+	},
+};
