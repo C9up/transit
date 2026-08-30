@@ -119,6 +119,52 @@ describe("transit > oidc > begin", () => {
 		expect(started.url).not.toContain(verifier);
 	});
 
+	it("sends no PKCE, and no verifier, to a provider that takes neither", async () => {
+		const without = {
+			...metadata,
+			code_challenge_methods_supported: ["plain"],
+		};
+		const driver = new OidcDriver(config);
+		const { started } = await begin(driver, without);
+
+		expect(new URL(started.url).searchParams.get("code_challenge")).toBeNull();
+		// `secret` still carries the nonce, with nothing before the separator.
+		expect(started.secret?.startsWith(".")).toBe(true);
+
+		const calls = stubProvider({
+			[`${ISSUER}/.well-known`]: without,
+			[`${ISSUER}/token`]: {
+				access_token: "at",
+				id_token: idToken(
+					claims({ nonce: (started.secret as string).slice(1) }),
+				),
+			},
+			[`${ISSUER}/jwks`]: { keys: [jwk] },
+			[`${ISSUER}/userinfo`]: { sub: "user-1" },
+		});
+		await driver.callback("code", started.state, started.state, started.secret);
+
+		// Sending a verifier for a challenge that was never sent is noise a
+		// strict provider refuses the exchange over.
+		const exchange = calls.find((call) =>
+			call.url.startsWith(`${ISSUER}/token`),
+		);
+		expect(
+			(exchange?.init?.body as URLSearchParams).get("code_verifier"),
+		).toBeNull();
+	});
+
+	it("refuses a secret that did not come from begin()", async () => {
+		const driver = new OidcDriver(config);
+		const { started } = await begin(driver);
+
+		for (const secret of ["", "no-separator", "."]) {
+			await expect(
+				driver.callback("code", started.state, started.state, secret),
+			).rejects.toThrow(/begin\(\) returned as `secret`/);
+		}
+	});
+
 	it("adds `openid` when a config forgets it", async () => {
 		const driver = new OidcDriver({ ...config, scopes: ["email"] });
 		const { started } = await begin(driver);

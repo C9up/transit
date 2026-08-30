@@ -106,16 +106,22 @@ export class OidcDriver implements TransitDriver {
 		});
 
 		// PKCE is not optional for a public client and costs nothing for a
-		// confidential one, so it is always sent when the provider takes it.
-		if (metadata.code_challenge_methods_supported?.includes("S256") !== false) {
+		// confidential one, so it is sent unless the provider says outright that
+		// it does not take S256.
+		const pkce =
+			metadata.code_challenge_methods_supported?.includes("S256") !== false;
+		if (pkce) {
 			params.set("code_challenge", challengeFor(verifier));
 			params.set("code_challenge_method", "S256");
 		}
 
+		// Whether PKCE was used travels in `secret`. Sending a verifier for a
+		// challenge that was never sent is at best noise, and a strict provider
+		// refuses the exchange over it.
 		return {
 			url: `${metadata.authorization_endpoint}?${params}`,
 			state,
-			secret: `${verifier}${SECRET_SEPARATOR}${nonce}`,
+			secret: `${pkce ? verifier : ""}${SECRET_SEPARATOR}${nonce}`,
 		};
 	}
 
@@ -202,7 +208,8 @@ export class OidcDriver implements TransitDriver {
 			redirect_uri: this.#config.callbackUrl,
 			client_id: this.#config.clientId,
 			client_secret: await this.#clientSecret(),
-			code_verifier: verifier,
+			// Only when a challenge was actually sent.
+			...(verifier === "" ? {} : { code_verifier: verifier }),
 		});
 		const response = await fetch(metadata.token_endpoint, {
 			method: "POST",
@@ -360,13 +367,13 @@ function splitSecret(secret: string | undefined): {
 	nonce: string;
 } {
 	const index = secret?.indexOf(SECRET_SEPARATOR) ?? -1;
-	if (secret === undefined || index <= 0) {
+	// An empty verifier is legitimate — it says PKCE was not used. A missing
+	// separator, or a missing nonce, is a value that did not come from begin().
+	const nonce = secret === undefined ? "" : secret.slice(index + 1);
+	if (secret === undefined || index === -1 || nonce === "") {
 		throw new Error(
 			"[transit] OpenID Connect needs the value begin() returned as `secret` — store it with the state and pass it back here.",
 		);
 	}
-	return {
-		verifier: secret.slice(0, index),
-		nonce: secret.slice(index + SECRET_SEPARATOR.length),
-	};
+	return { verifier: secret.slice(0, index), nonce };
 }

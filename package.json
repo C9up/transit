@@ -38,8 +38,17 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
     "@types/node": "^22.19.15",
+    "@vitest/coverage-v8": "^4.1.5",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
+  },
+  "peerDependencies": {
+    "@c9up/quasar": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@c9up/quasar": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=22.0.0"
