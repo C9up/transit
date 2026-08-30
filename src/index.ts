@@ -7,6 +7,7 @@
  */
 
 export { type AppleKey, appleClientSecret, parseAppleUser } from "./apple.js";
+export { type CanonicalizeOptions, canonicalize } from "./c14n.js";
 export type {
 	TransitConfig,
 	TransitDriverFactory,
@@ -40,3 +41,16 @@ export type {
 	TransitUser,
 } from "./types.js";
 export { assertOAuthState } from "./types.js";
+export {
+	childrenNamed,
+	findByAttribute,
+	parseXml,
+	resolvePrefix,
+	textOf,
+	walk,
+	XML_NS,
+	type XmlAttribute,
+	type XmlElement,
+	type XmlNamespace,
+	type XmlNode,
+} from "./xml.js";
