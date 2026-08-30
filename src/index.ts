@@ -11,18 +11,21 @@ export type {
 	TransitDriverFactory,
 	TransitProviderEntry,
 } from "./config.js";
-export { defineConfig, socials } from "./config.js";
+export { defineConfig, oidc, socials } from "./config.js";
 export { DiscordDriver } from "./drivers/DiscordDriver.js";
 export { FacebookDriver } from "./drivers/FacebookDriver.js";
 export { GitHubDriver } from "./drivers/GitHubDriver.js";
 export { GoogleDriver } from "./drivers/GoogleDriver.js";
 export { LinkedInDriver } from "./drivers/LinkedInDriver.js";
 export { LinkedInOpenidConnectDriver } from "./drivers/LinkedInOpenidConnectDriver.js";
+export { type OidcConfig, OidcDriver } from "./drivers/OidcDriver.js";
 export { SpotifyDriver } from "./drivers/SpotifyDriver.js";
 export { TwitterDriver } from "./drivers/TwitterDriver.js";
 export { TwitterXDriver } from "./drivers/TwitterXDriver.js";
+export type { IdTokenClaims, Jwk, SupportedAlg } from "./jwt.js";
 export { Oauth1Driver } from "./Oauth1Driver.js";
 export { createCodeVerifier, Oauth2Driver } from "./Oauth2Driver.js";
+export type { OidcMetadata, RemoteOptions } from "./oidc.js";
 export { TransitManager } from "./TransitManager.js";
 export type { TransitAppContext } from "./TransitProvider.js";
 export { default as TransitProvider } from "./TransitProvider.js";

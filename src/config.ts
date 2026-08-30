@@ -22,6 +22,7 @@ import { GitHubDriver } from "./drivers/GitHubDriver.js";
 import { GoogleDriver } from "./drivers/GoogleDriver.js";
 import { LinkedInDriver } from "./drivers/LinkedInDriver.js";
 import { LinkedInOpenidConnectDriver } from "./drivers/LinkedInOpenidConnectDriver.js";
+import { type OidcConfig, OidcDriver } from "./drivers/OidcDriver.js";
 import { SpotifyDriver } from "./drivers/SpotifyDriver.js";
 import { TwitterDriver } from "./drivers/TwitterDriver.js";
 import { TwitterXDriver } from "./drivers/TwitterXDriver.js";
@@ -45,6 +46,25 @@ export function defineConfig<T extends TransitConfig>(config: T): T {
  * Factories are lazy, so a config naming a provider this environment never
  * selects costs nothing to declare.
  */
+/**
+ * Any provider that speaks OpenID Connect, from its issuer alone — Keycloak,
+ * Auth0, Okta, Entra ID, Authentik, Zitadel, and the rest.
+ *
+ *   work: oidc({
+ *     issuer: 'https://id.acme.com',
+ *     clientId: env.get('OIDC_CLIENT_ID'),
+ *     clientSecret: env.get('OIDC_CLIENT_SECRET'),
+ *     callbackUrl: 'https://acme.test/auth/work/callback',
+ *   })
+ *
+ * The endpoints, the signing keys and the algorithms come from what the
+ * provider publishes, so there is nothing else to configure and nothing to
+ * update when it rotates a key.
+ */
+export function oidc(config: OidcConfig): TransitDriverFactory {
+	return () => new OidcDriver(config);
+}
+
 export const socials = {
 	discord(config: OAuthConfig): TransitDriverFactory {
 		return () => new DiscordDriver(config);

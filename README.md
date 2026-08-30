@@ -3,9 +3,9 @@
 > Federated sign-in for the Ream framework — everything that lets a person
 > prove who they are through an authority your application does not own.
 
-Today: OAuth1, OAuth2, and the providers that speak them. The package exists so
-that OpenID Connect, SAML and directory lookups can join them without inflating
-the authentication package.
+Today: generic OpenID Connect, OAuth1, OAuth2, and the providers that speak
+them. The package exists so that SAML and directory lookups can join them
+without inflating the authentication package.
 
 Part of **[Ream](https://github.com/C9up/ream)**. Independent, publishable
 package — it imports nothing from the rest of the framework.
@@ -71,6 +71,29 @@ controller serve all three.
 
 `socials.discord`, `.facebook`, `.github`, `.google`, `.linkedin`,
 `.linkedinOpenidConnect`, `.spotify`, `.twitter` (OAuth1), `.twitterX` (OAuth2).
+
+## OpenID Connect
+
+One driver for every conforming provider — Keycloak, Auth0, Okta, Entra ID,
+Authentik, Zitadel. Give it an issuer; the endpoints, keys and algorithms come
+from what the provider publishes.
+
+```ts
+export default defineConfig({
+  work: oidc({
+    issuer: 'https://id.acme.com',
+    clientId: env.get('OIDC_CLIENT_ID'),
+    clientSecret: env.get('OIDC_CLIENT_SECRET'),
+    callbackUrl: 'https://acme.test/auth/work/callback',
+  }),
+})
+```
+
+The `id_token` is a signed statement about who the user is, so it is verified
+before anyone is signed in: signature against the published key, algorithm
+taken from what the provider **declared** rather than from the token's own
+header, and every claim that binds it to this exchange — `iss`, `aud`, `exp`,
+and the `nonce`. Only asymmetric signatures are accepted.
 
 ## Before linking an account by email
 

@@ -1,7 +1,7 @@
 {
   "name": "@c9up/transit",
   "version": "0.1.0",
-  "description": "Transit — federated sign-in for the Ream framework: OAuth1, OAuth2 and the providers that speak them",
+  "description": "Transit \u2014 federated sign-in for the Ream framework: OpenID Connect, OAuth1, OAuth2",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",

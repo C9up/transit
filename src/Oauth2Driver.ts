@@ -244,7 +244,7 @@ export abstract class Oauth2Driver implements TransitDriver {
 }
 
 /** The S256 challenge a provider compares the verifier against. */
-function challengeFor(secret: string): string {
+export function challengeFor(secret: string): string {
 	return createHash("sha256").update(secret).digest("base64url");
 }
 
