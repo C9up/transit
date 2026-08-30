@@ -23,6 +23,9 @@ providers: [
 ]
 ```
 
+`ream add @c9up/transit` installs it, registers the provider and writes
+`config/transit.ts`. The rest of this page assumes that has run.
+
 ## Configuration
 
 ```ts
