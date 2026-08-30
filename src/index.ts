@@ -29,6 +29,24 @@ export type { IdTokenClaims, Jwk, SupportedAlg } from "./jwt.js";
 export { Oauth1Driver } from "./Oauth1Driver.js";
 export { createCodeVerifier, Oauth2Driver } from "./Oauth2Driver.js";
 export type { OidcMetadata, RemoteOptions } from "./oidc.js";
+export {
+	type AssertionReplayStore,
+	MemoryAssertionReplayStore,
+	RedisAssertionReplayStore,
+	type ReplayRedisClient,
+	type ReplayRedisResolver,
+	replayStores,
+} from "./replay.js";
+export {
+	assertionInside,
+	assertResponseSucceeded,
+	SAML_ASSERTION_NS,
+	SAML_PROTOCOL_NS,
+	SamlError,
+	type SamlExpectations,
+	type SamlIdentity,
+	validateAssertion,
+} from "./saml.js";
 export { TransitManager } from "./TransitManager.js";
 export type { TransitAppContext } from "./TransitProvider.js";
 export { default as TransitProvider } from "./TransitProvider.js";
