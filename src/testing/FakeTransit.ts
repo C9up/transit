@@ -47,6 +47,10 @@ const DEFAULT_TOKEN: OAuthToken = { accessToken: "fake-access-token" };
 export class FakeTransit extends TransitManager {
 	readonly #identities = new Map<string, TransitUser>();
 	readonly #tokens = new Map<string, OAuthToken>();
+	readonly #credentials = new Map<
+		string,
+		{ username: string; password: string }
+	>();
 	/** Every `begin()` this saw, oldest first. */
 	readonly begun: BegunSignIn[] = [];
 	/** Every sign-in that completed, oldest first. */
@@ -56,6 +60,16 @@ export class FakeTransit extends TransitManager {
 	 * Declare who comes back from `name`. Anything left out is filled in, so a
 	 * test states only what it is about.
 	 */
+	/**
+	 * Declare the credentials a directory accepts under `name`. Without this,
+	 * `authenticate` accepts any pair — which is what a test about roles wants,
+	 * and a test about a wrong password does not.
+	 */
+	willAccept(name: string, username: string, password: string): this {
+		this.#credentials.set(name, { username, password });
+		return this;
+	}
+
 	willReturn(
 		name: string,
 		identity: FakeIdentity = {},
@@ -119,6 +133,48 @@ export class FakeTransit extends TransitManager {
 		}
 		this.signedIn.push({ name, user });
 		return { user, token: this.#tokens.get(name) ?? DEFAULT_TOKEN };
+	}
+
+	/**
+	 * A directory sign-in, doubled.
+	 *
+	 * The empty-password refusal is repeated here for the same reason the state
+	 * check is: a bind with no password is an anonymous bind the directory
+	 * accepts, and a fake that let it through would teach an application to
+	 * submit one.
+	 */
+	override async authenticate(
+		name: string,
+		username: string,
+		password: string,
+	): Promise<TransitUser> {
+		if (password === "") {
+			throw new Error(
+				"[transit] a password is required — an empty one is an anonymous bind, which the directory would accept",
+			);
+		}
+		if (username === "") {
+			throw new Error("[transit] a username is required");
+		}
+		const user = this.#identities.get(name);
+		if (!user) {
+			throw new Error(
+				`[transit] nothing declared for '${name}'. Call willReturn('${name}', …) before the sign-in runs.`,
+			);
+		}
+		const credentials = this.#credentials.get(name);
+		if (credentials && credentials.password !== password) {
+			throw new Error(
+				"[transit] the directory refused the bind: invalid credentials",
+			);
+		}
+		if (credentials && credentials.username !== username) {
+			throw new Error(
+				"[transit] the directory refused the bind: invalid credentials",
+			);
+		}
+		this.signedIn.push({ name, user });
+		return user;
 	}
 
 	override async userFromToken(name: string): Promise<TransitUser> {

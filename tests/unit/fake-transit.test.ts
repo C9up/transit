@@ -134,3 +134,54 @@ describe("transit > FakeTransit", () => {
 		expect(await resolved.begin("google")).toHaveProperty("state");
 	});
 });
+
+describe("transit > FakeTransit > a directory", () => {
+	it("signs someone in without any redirect", async () => {
+		const transit = new FakeTransit().willReturn("staff", {
+			email: "ada@acme.test",
+		});
+
+		const user = await transit.authenticate("staff", "ada", "any password");
+
+		expect(user.email).toBe("ada@acme.test");
+		transit.assertSignedIn("staff");
+	});
+
+	it("refuses an empty password, as the real one does", async () => {
+		const transit = new FakeTransit().willReturn("staff");
+
+		// A bind with no password is an anonymous bind the directory accepts.
+		// A fake that let it through would teach an application to submit one.
+		await expect(transit.authenticate("staff", "ada", "")).rejects.toThrow(
+			/anonymous bind/,
+		);
+		transit.assertNobodySignedIn();
+	});
+
+	it("refuses an empty username", async () => {
+		const transit = new FakeTransit().willReturn("staff");
+
+		await expect(transit.authenticate("staff", "", "x")).rejects.toThrow(
+			/username is required/,
+		);
+	});
+
+	it("checks the credentials a test declared", async () => {
+		const transit = new FakeTransit()
+			.willReturn("staff")
+			.willAccept("staff", "ada", "correct horse");
+
+		await expect(
+			transit.authenticate("staff", "ada", "correct horse"),
+		).resolves.toBeDefined();
+		await expect(transit.authenticate("staff", "ada", "wrong")).rejects.toThrow(
+			/invalid credentials/,
+		);
+	});
+
+	it("says what to call when nothing was declared", async () => {
+		await expect(
+			new FakeTransit().authenticate("staff", "ada", "x"),
+		).rejects.toThrow(/willReturn\('staff'/);
+	});
+});

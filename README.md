@@ -160,14 +160,14 @@ container.singleton(TransitManager, () => transit)
 transit.assertSignedIn('google')
 ```
 
-The double still enforces the state round trip and the value `begin()` asked
-you to keep. A fake that let a forgetful controller pass would teach
-applications to ship one.
+The double still enforces the state round trip, the value `begin()` asked you
+to keep, and — for a directory — the refusal of an empty password. A fake that
+let a forgetful controller pass would teach applications to ship one.
 
 ## Entry points
 
 - `@c9up/transit` — main API
-- `@c9up/transit/config` — `defineConfig`, `socials`, `oidc`
+- `@c9up/transit/config` — `defineConfig`, `socials`, `oidc`, `saml`, `ldap`
 - `@c9up/transit/provider` — Ream IoC provider
 - `@c9up/transit/services/main` — container service accessor
 - `@c9up/transit/testing` — `FakeTransit`
