@@ -19,6 +19,10 @@
       "types": "./src/TransitProvider.ts",
       "import": "./src/TransitProvider.ts"
     },
+    "./configure": {
+      "types": "./src/configure.ts",
+      "import": "./src/configure.ts"
+    },
     "./services/main": {
       "types": "./src/services/main.ts",
       "import": "./src/services/main.ts"
@@ -74,6 +78,10 @@
       "./provider": {
         "types": "./dist/TransitProvider.d.ts",
         "import": "./dist/TransitProvider.js"
+      },
+      "./configure": {
+        "types": "./dist/configure.d.ts",
+        "import": "./dist/configure.js"
       },
       "./services/main": {
         "types": "./dist/services/main.d.ts",
