@@ -21,6 +21,7 @@ import { DiscordDriver } from "./drivers/DiscordDriver.js";
 import { FacebookDriver } from "./drivers/FacebookDriver.js";
 import { GitHubDriver } from "./drivers/GitHubDriver.js";
 import { GoogleDriver } from "./drivers/GoogleDriver.js";
+import { type LdapConfig, LdapDirectory } from "./drivers/LdapDirectory.js";
 import { LinkedInDriver } from "./drivers/LinkedInDriver.js";
 import { LinkedInOpenidConnectDriver } from "./drivers/LinkedInOpenidConnectDriver.js";
 import { type OidcConfig, OidcDriver } from "./drivers/OidcDriver.js";
@@ -28,13 +29,13 @@ import { type SamlConfig, SamlDriver } from "./drivers/SamlDriver.js";
 import { SpotifyDriver } from "./drivers/SpotifyDriver.js";
 import { TwitterDriver } from "./drivers/TwitterDriver.js";
 import { TwitterXDriver } from "./drivers/TwitterXDriver.js";
-import type { OAuthConfig, TransitDriver } from "./types.js";
+import type { OAuthConfig, TransitEntry } from "./types.js";
 
 /** A provider, built when the manager is. */
-export type TransitDriverFactory = () => TransitDriver;
+export type TransitDriverFactory = () => TransitEntry;
 
 /** One declared provider: the driver itself, or a factory answering one. */
-export type TransitProviderEntry = TransitDriver | TransitDriverFactory;
+export type TransitProviderEntry = TransitEntry | TransitDriverFactory;
 
 export type TransitConfig = Record<string, TransitProviderEntry>;
 
@@ -84,6 +85,24 @@ export function oidc(config: OidcConfig): TransitDriverFactory {
  */
 export function saml(config: SamlConfig): TransitDriverFactory {
 	return () => new SamlDriver(config);
+}
+
+/**
+ * An LDAP or Active Directory directory.
+ *
+ *   staff: ldap({
+ *     url: 'ldaps://directory.acme.test',
+ *     baseDn: 'dc=acme,dc=test',
+ *     loginAttribute: 'uid',
+ *     bindDn: 'cn=reader,dc=acme,dc=test',
+ *     bindPassword: env.get('LDAP_PASSWORD'),
+ *   })
+ *
+ * Reached with `transit.authenticate(name, username, password)`: nothing is
+ * redirected, so there is no `begin()` for it.
+ */
+export function ldap(config: LdapConfig): TransitDriverFactory {
+	return () => new LdapDirectory(config);
 }
 
 export const socials = {

@@ -10,16 +10,55 @@
  */
 
 import type {
+	DirectoryDriver,
 	OAuthToken,
 	RedirectRequest,
 	TransitDriver,
+	TransitEntry,
 	TransitUser,
 } from "./types.js";
+import { isDirectory } from "./types.js";
 
 export class TransitManager {
-	#drivers: Map<string, TransitDriver> = new Map();
+	#drivers: Map<string, TransitEntry> = new Map();
 
+	/** The provider a browser is sent to, under `name`. */
 	use(name: string): TransitDriver {
+		const entry = this.#entry(name);
+		if (isDirectory(entry)) {
+			throw new Error(
+				`[transit] '${name}' is a directory: it verifies credentials rather than redirecting. Use authenticate('${name}', …).`,
+			);
+		}
+		return entry;
+	}
+
+	/** The directory under `name`. */
+	directory(name: string): DirectoryDriver {
+		const entry = this.#entry(name);
+		if (!isDirectory(entry)) {
+			throw new Error(
+				`[transit] '${name}' is a redirect provider, not a directory. Use begin('${name}').`,
+			);
+		}
+		return entry;
+	}
+
+	/**
+	 * Verify a login against the directory under `name`.
+	 *
+	 * No redirect and no state: the application already holds the credentials,
+	 * and the directory is the authority that says whether they are right.
+	 */
+	async authenticate(
+		name: string,
+		username: string,
+		password: string,
+	): Promise<TransitUser> {
+		return this.directory(name).authenticate(username, password);
+	}
+
+	#entry(name: string): TransitEntry {
 		const driver = this.#drivers.get(name);
 		if (!driver)
 			throw new Error(
@@ -28,7 +67,7 @@ export class TransitManager {
 		return driver;
 	}
 
-	register(name: string, driver: TransitDriver): void {
+	register(name: string, driver: TransitEntry): void {
 		this.#drivers.set(name, driver);
 	}
 

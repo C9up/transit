@@ -3,9 +3,9 @@
 > Federated sign-in for the Ream framework — everything that lets a person
 > prove who they are through an authority your application does not own.
 
-Today: SAML 2.0, generic OpenID Connect, OAuth1, OAuth2, and the providers
-that speak them — written here, without a dependency, down to the XML reader
-and the canonicalization a signature is checked over.
+Today: SAML 2.0, LDAP, generic OpenID Connect, OAuth1, OAuth2, and the
+providers that speak them — written here, without a dependency, down to the XML
+reader a signature is canonicalized over and the BER a directory is asked in.
 
 Part of **[Ream](https://github.com/C9up/ream)**. Independent, publishable
 package — it imports nothing from the rest of the framework.
@@ -75,6 +75,27 @@ controller serve all three.
 Sign in with Apple takes a key rather than a secret, its callback arrives as a
 POST, and it sends the user's name exactly once — read it with
 `parseAppleUser(ctx.request.input('user'))` and store it.
+
+## LDAP and Active Directory
+
+```ts
+export default defineConfig({
+  staff: ldap({
+    url: 'ldaps://directory.acme.test',
+    baseDn: 'dc=acme,dc=test',
+    loginAttribute: 'uid',
+    bindDn: 'cn=reader,dc=acme,dc=test',
+    bindPassword: env.get('LDAP_PASSWORD'),
+  }),
+})
+
+const user = await transit.authenticate('staff', username, password)
+```
+
+An empty password is refused before a socket is opened: a simple bind with no
+password is an anonymous bind, and the directory answers success. And there is
+no filter string — a filter is a structure whose values are written as octets,
+so a username cannot become syntax.
 
 ## SAML 2.0
 

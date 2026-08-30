@@ -105,6 +105,27 @@ export interface TransitDriver {
 }
 
 /**
+ * A directory that verifies credentials, rather than a provider a browser is
+ * sent to. LDAP and Active Directory are this shape: nothing is redirected,
+ * the application asks and the directory answers.
+ */
+export interface DirectoryDriver {
+	/** Verify a login, and answer with who the directory says this is. */
+	authenticate(username: string, password: string): Promise<TransitUser>;
+}
+
+/** Either shape a configured provider can take. */
+export type TransitEntry = TransitDriver | DirectoryDriver;
+
+/** Whether an entry verifies credentials rather than redirecting. */
+export function isDirectory(entry: TransitEntry): entry is DirectoryDriver {
+	return (
+		typeof (entry as DirectoryDriver).authenticate === "function" &&
+		typeof (entry as TransitDriver).callback !== "function"
+	);
+}
+
+/**
  * Check the OAuth `state` round-trip, failing CLOSED.
  *
  * The check used to be `if (expectedState && state !== expectedState)`, so a
