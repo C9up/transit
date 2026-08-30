@@ -34,6 +34,11 @@ export interface CanonicalizeOptions {
 	inclusivePrefixes?: string[];
 	/** Comments are excluded unless the algorithm says otherwise. */
 	withComments?: boolean;
+	/**
+	 * Nodes to leave out of the output — what the enveloped-signature transform
+	 * needs, since an element cannot carry a digest of itself.
+	 */
+	omit?: ReadonlySet<XmlNode>;
 }
 
 /** The canonical form of an element and everything under it. */
@@ -115,6 +120,7 @@ function writeElement(
 	out.push(">");
 
 	for (const child of element.children) {
+		if (options.omit?.has(child)) continue;
 		writeNode(child, out, childRendered, options);
 	}
 
