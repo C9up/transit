@@ -118,9 +118,20 @@ export default defineConfig({
 The certificates come from the provider's metadata and nowhere else. The
 element the signature covers is the element that is read — nothing is looked up
 in the document afterwards, which is what closes XML Signature Wrapping. An
-assertion is a bearer token, so its id is remembered until it expires; the
-default store is per-process, so pass a Redis one as soon as there is a second
-replica.
+assertion is a bearer token, so its id is remembered until it expires.
+
+That record has to be **shared by every replica**, because it is what stops the
+same assertion being presented twice. The in-process default bounds replay
+within one process and not beyond it, so in production the driver refuses to
+choose it for you — say which store you want:
+
+```ts
+replayStore: replayStores.redis({ connection: 'main' })  // shared across replicas
+replayStore: replayStores.memory()                       // a single process, deliberately
+```
+
+Outside production the in-process store remains the default: one dev process is
+the case it is correct for.
 
 ## OpenID Connect
 

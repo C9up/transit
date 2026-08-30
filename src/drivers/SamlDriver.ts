@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 import { verifyXmlSignature } from "../dsig.js";
+import { inProduction } from "../nodeEnv.js";
 import {
 	type AssertionReplayStore,
 	MemoryAssertionReplayStore,
@@ -93,6 +94,26 @@ export interface SamlConfig {
 	claims?: { email?: string; name?: string; nickName?: string };
 }
 
+/**
+ * Refuse to fall into the memory replay store by DEFAULT in production.
+ *
+ * A store that bounds replay per process is real protection on one replica and
+ * none at all on two, and nothing here can tell which is deployed. Defaulting
+ * quietly means the protection disappears exactly when a service is scaled —
+ * the moment nobody is looking at this file.
+ *
+ * Outside production the default stands: a single dev process is the case it
+ * is correct for.
+ */
+function refuseImplicitMemoryReplayStoreInProduction(): void {
+	if (!inProduction()) return;
+	throw new SamlError(
+		"SAML replay protection has no store configured, and the in-process default only bounds replay within ONE process — behind a second replica the same assertion is accepted again on each.\n" +
+			"  Set `replayStore: replayStores.redis({ connection })` to share the record across replicas,\n" +
+			"  or `replayStores.memory()` to state that a single process is intended.",
+	);
+}
+
 export class SamlDriver implements TransitDriver {
 	readonly #config: SamlConfig;
 	#replay: AssertionReplayStore | undefined;
@@ -105,6 +126,12 @@ export class SamlDriver implements TransitDriver {
 			throw new SamlError(
 				`no signing certificate for '${config.issuer}' — take them from the provider's metadata`,
 			);
+		}
+		if (config.replayStore === undefined) {
+			// Decided here, not on the first sign-in: a driver that discovered
+			// this mid-request would have let the application boot looking
+			// healthy, and reported it to whoever happened to sign in first.
+			refuseImplicitMemoryReplayStoreInProduction();
 		}
 		this.#config = config;
 	}

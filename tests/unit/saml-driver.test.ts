@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { canonicalize } from "../../src/c14n.js";
 import { saml } from "../../src/config.js";
 import { SamlDriver } from "../../src/drivers/SamlDriver.js";
@@ -335,5 +335,62 @@ describe("transit > saml > callback", () => {
 describe("transit > saml helper", () => {
 	it("builds the driver", () => {
 		expect(saml(config)()).toBeInstanceOf(SamlDriver);
+	});
+});
+
+describe("the replay store has to be chosen for production", () => {
+	const original = process.env.NODE_ENV;
+	afterEach(() => {
+		process.env.NODE_ENV = original;
+	});
+
+	it("takes the in-process default outside production", () => {
+		process.env.NODE_ENV = "development";
+
+		// One dev process is exactly the case that store is correct for.
+		expect(() => new SamlDriver(config)).not.toThrow();
+	});
+
+	it("refuses to CHOOSE it in production", () => {
+		process.env.NODE_ENV = "production";
+
+		// It bounds replay within ONE process. Defaulting quietly means the
+		// protection disappears the moment the service is scaled, which is when
+		// nobody is looking at this file.
+		expect(() => new SamlDriver(config)).toThrow(
+			/replay protection has no store configured/,
+		);
+	});
+
+	it("names both ways out", () => {
+		process.env.NODE_ENV = "production";
+
+		try {
+			new SamlDriver(config);
+			expect.unreachable("production must refuse the implicit default");
+		} catch (error) {
+			expect((error as Error).message).toMatch(/replayStores\.redis/);
+			expect((error as Error).message).toMatch(/replayStores\.memory/);
+		}
+	});
+
+	it("honours an explicit memory store in production", () => {
+		process.env.NODE_ENV = "production";
+
+		expect(
+			() =>
+				new SamlDriver({
+					...config,
+					replayStore: () => new MemoryAssertionReplayStore(),
+				}),
+		).not.toThrow();
+	});
+
+	it("refuses at construction, not at the first sign-in", () => {
+		process.env.NODE_ENV = "production";
+
+		// A driver that discovered this mid-request would have let the app boot
+		// looking healthy, and reported it to whoever signed in first.
+		expect(() => new SamlDriver(config)).toThrow();
 	});
 });
