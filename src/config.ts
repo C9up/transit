@@ -16,6 +16,7 @@
  * `use(name)` asks for the key, not for the provider.
  */
 
+import { type AppleConfig, AppleDriver } from "./drivers/AppleDriver.js";
 import { DiscordDriver } from "./drivers/DiscordDriver.js";
 import { FacebookDriver } from "./drivers/FacebookDriver.js";
 import { GitHubDriver } from "./drivers/GitHubDriver.js";
@@ -66,6 +67,19 @@ export function oidc(config: OidcConfig): TransitDriverFactory {
 }
 
 export const socials = {
+	/**
+	 * Sign in with Apple. Required on iOS as soon as another social sign-in is
+	 * offered.
+	 *
+	 * It takes a key rather than a secret — the Services ID, the Team ID, the
+	 * Key ID and the contents of the `.p8` — and its callback arrives as a
+	 * POST, because asking for a name forces `response_mode=form_post`. The
+	 * name comes once, in that POST: read it with `parseAppleUser` and store
+	 * it, because Apple never sends it again.
+	 */
+	apple(config: AppleConfig): TransitDriverFactory {
+		return () => new AppleDriver(config);
+	},
 	discord(config: OAuthConfig): TransitDriverFactory {
 		return () => new DiscordDriver(config);
 	},

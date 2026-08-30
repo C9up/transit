@@ -6,12 +6,14 @@
  * that speak them.
  */
 
+export { type AppleKey, appleClientSecret, parseAppleUser } from "./apple.js";
 export type {
 	TransitConfig,
 	TransitDriverFactory,
 	TransitProviderEntry,
 } from "./config.js";
 export { defineConfig, oidc, socials } from "./config.js";
+export { type AppleConfig, AppleDriver } from "./drivers/AppleDriver.js";
 export { DiscordDriver } from "./drivers/DiscordDriver.js";
 export { FacebookDriver } from "./drivers/FacebookDriver.js";
 export { GitHubDriver } from "./drivers/GitHubDriver.js";

@@ -69,8 +69,12 @@ controller serve all three.
 
 ## Providers
 
-`socials.discord`, `.facebook`, `.github`, `.google`, `.linkedin`,
+`socials.apple`, `.discord`, `.facebook`, `.github`, `.google`, `.linkedin`,
 `.linkedinOpenidConnect`, `.spotify`, `.twitter` (OAuth1), `.twitterX` (OAuth2).
+
+Sign in with Apple takes a key rather than a secret, its callback arrives as a
+POST, and it sends the user's name exactly once — read it with
+`parseAppleUser(ctx.request.input('user'))` and store it.
 
 ## OpenID Connect
 

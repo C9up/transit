@@ -40,7 +40,12 @@ export interface OidcConfig {
 	/** The provider's issuer URL, exactly as it appears in its tokens. */
 	issuer: string;
 	clientId: string;
-	clientSecret: string;
+	/**
+	 * The client secret, or something that mints one. Apple has no static
+	 * secret — it expects a short-lived JWT signed with a private key — so this
+	 * is resolved at each token request rather than read once.
+	 */
+	clientSecret: string | (() => string | Promise<string>);
 	callbackUrl: string;
 	/** Default `["openid", "profile", "email"]`. `openid` is added if omitted. */
 	scopes?: string[];
@@ -138,7 +143,7 @@ export class OidcDriver implements TransitDriver {
 		const profile = await this.#profile(metadata, accessToken, claims);
 
 		return {
-			user: mapUser(profile),
+			user: this.mapUser(profile),
 			token: {
 				accessToken,
 				...(typeof tokens.refresh_token === "string"
@@ -159,9 +164,23 @@ export class OidcDriver implements TransitDriver {
 				`[transit] '${this.#config.issuer}' publishes no userinfo endpoint, so a profile cannot be read from a token alone.`,
 			);
 		}
-		return mapUser(
+		return this.mapUser(
 			await this.#userinfo(metadata.userinfo_endpoint, accessToken),
 		);
+	}
+
+	/**
+	 * Turn the claims into the shape every driver answers with. A provider that
+	 * spells a standard claim its own way overrides this.
+	 */
+	protected mapUser(raw: Record<string, unknown>): TransitUser {
+		return mapOidcUser(raw);
+	}
+
+	/** The secret for one token request. */
+	async #clientSecret(): Promise<string> {
+		const secret = this.#config.clientSecret;
+		return typeof secret === "function" ? await secret() : secret;
 	}
 
 	#scopes(): string[] {
@@ -182,7 +201,7 @@ export class OidcDriver implements TransitDriver {
 			code,
 			redirect_uri: this.#config.callbackUrl,
 			client_id: this.#config.clientId,
-			client_secret: this.#config.clientSecret,
+			client_secret: await this.#clientSecret(),
 			code_verifier: verifier,
 		});
 		const response = await fetch(metadata.token_endpoint, {
@@ -310,7 +329,7 @@ export class OidcDriver implements TransitDriver {
 }
 
 /** Standard OpenID Connect claims, in the shape every driver answers with. */
-function mapUser(raw: Record<string, unknown>): TransitUser {
+export function mapOidcUser(raw: Record<string, unknown>): TransitUser {
 	const given = str(raw, "given_name");
 	const family = str(raw, "family_name");
 	const email = str(raw, "email");

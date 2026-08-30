@@ -156,12 +156,14 @@ describe("transit > Twitter (OAuth1) > callback", () => {
 		stubFetch(accessToken, {
 			ok: true,
 			status: 200,
-			body: {
-				id_str: "1234567890123456789",
-				id: 1234567890123456789,
-				screen_name: "kaen",
-				profile_image_url_https: "https://pbs.test/a_normal.jpg",
-			},
+			// Parsed from text, exactly as it arrives on the wire: writing the
+			// numeric id as a literal would already have lost the digits this
+			// test is about.
+			body: JSON.parse(
+				'{"id_str":"1234567890123456789","id":1234567890123456789,' +
+					'"screen_name":"kaen",' +
+					'"profile_image_url_https":"https://pbs.test/a_normal.jpg"}',
+			),
 		});
 		const out = await new TwitterDriver(config).callback(
 			"v",

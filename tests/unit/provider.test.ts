@@ -50,7 +50,7 @@ const credentials = {
 
 describe("transit > provider", () => {
 	it("registers the manager under its class and the `transit` alias", async () => {
-		const { registry, app } = makeApp({ google: socials.google(credentials) });
+		const { app } = makeApp({ google: socials.google(credentials) });
 
 		const provider = new TransitProvider(app);
 		provider.register();
