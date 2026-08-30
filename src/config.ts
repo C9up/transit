@@ -24,6 +24,7 @@ import { GoogleDriver } from "./drivers/GoogleDriver.js";
 import { LinkedInDriver } from "./drivers/LinkedInDriver.js";
 import { LinkedInOpenidConnectDriver } from "./drivers/LinkedInOpenidConnectDriver.js";
 import { type OidcConfig, OidcDriver } from "./drivers/OidcDriver.js";
+import { type SamlConfig, SamlDriver } from "./drivers/SamlDriver.js";
 import { SpotifyDriver } from "./drivers/SpotifyDriver.js";
 import { TwitterDriver } from "./drivers/TwitterDriver.js";
 import { TwitterXDriver } from "./drivers/TwitterXDriver.js";
@@ -64,6 +65,25 @@ export function defineConfig<T extends TransitConfig>(config: T): T {
  */
 export function oidc(config: OidcConfig): TransitDriverFactory {
 	return () => new OidcDriver(config);
+}
+
+/**
+ * A SAML 2.0 identity provider — the enterprise directories that speak it:
+ * Okta, Entra ID, ADFS, OneLogin, Shibboleth.
+ *
+ *   corp: saml({
+ *     entityId: 'https://acme.test/saml',
+ *     callbackUrl: 'https://acme.test/saml/acs',
+ *     issuer: 'https://idp.acme.test/metadata',
+ *     signOnUrl: 'https://idp.acme.test/sso',
+ *     certificates: [env.get('IDP_CERTIFICATE')],
+ *   })
+ *
+ * The certificates come from the provider's metadata and nowhere else: a
+ * response is never verified against a key it carries itself.
+ */
+export function saml(config: SamlConfig): TransitDriverFactory {
+	return () => new SamlDriver(config);
 }
 
 export const socials = {

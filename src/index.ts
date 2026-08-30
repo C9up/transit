@@ -13,7 +13,7 @@ export type {
 	TransitDriverFactory,
 	TransitProviderEntry,
 } from "./config.js";
-export { defineConfig, oidc, socials } from "./config.js";
+export { defineConfig, oidc, saml, socials } from "./config.js";
 export { type AppleConfig, AppleDriver } from "./drivers/AppleDriver.js";
 export { DiscordDriver } from "./drivers/DiscordDriver.js";
 export { FacebookDriver } from "./drivers/FacebookDriver.js";
@@ -22,6 +22,7 @@ export { GoogleDriver } from "./drivers/GoogleDriver.js";
 export { LinkedInDriver } from "./drivers/LinkedInDriver.js";
 export { LinkedInOpenidConnectDriver } from "./drivers/LinkedInOpenidConnectDriver.js";
 export { type OidcConfig, OidcDriver } from "./drivers/OidcDriver.js";
+export { type SamlConfig, SamlDriver } from "./drivers/SamlDriver.js";
 export { SpotifyDriver } from "./drivers/SpotifyDriver.js";
 export { TwitterDriver } from "./drivers/TwitterDriver.js";
 export { TwitterXDriver } from "./drivers/TwitterXDriver.js";

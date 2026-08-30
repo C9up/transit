@@ -3,9 +3,9 @@
 > Federated sign-in for the Ream framework — everything that lets a person
 > prove who they are through an authority your application does not own.
 
-Today: generic OpenID Connect, OAuth1, OAuth2, and the providers that speak
-them. The package exists so that SAML and directory lookups can join them
-without inflating the authentication package.
+Today: SAML 2.0, generic OpenID Connect, OAuth1, OAuth2, and the providers
+that speak them — written here, without a dependency, down to the XML reader
+and the canonicalization a signature is checked over.
 
 Part of **[Ream](https://github.com/C9up/ream)**. Independent, publishable
 package — it imports nothing from the rest of the framework.
@@ -75,6 +75,28 @@ controller serve all three.
 Sign in with Apple takes a key rather than a secret, its callback arrives as a
 POST, and it sends the user's name exactly once — read it with
 `parseAppleUser(ctx.request.input('user'))` and store it.
+
+## SAML 2.0
+
+```ts
+export default defineConfig({
+  corp: saml({
+    entityId: 'https://acme.test/saml',
+    callbackUrl: 'https://acme.test/saml/acs',
+    issuer: 'https://idp.acme.test/metadata',
+    signOnUrl: 'https://idp.acme.test/sso',
+    certificates: [env.get('IDP_CERTIFICATE')],
+    replayStore: replayStores.redis({ connection: 'main' }),
+  }),
+})
+```
+
+The certificates come from the provider's metadata and nowhere else. The
+element the signature covers is the element that is read — nothing is looked up
+in the document afterwards, which is what closes XML Signature Wrapping. An
+assertion is a bearer token, so its id is remembered until it expires; the
+default store is per-process, so pass a Redis one as soon as there is a second
+replica.
 
 ## OpenID Connect
 
