@@ -14,6 +14,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { fetchWithTimeout } from "./httpTimeout.js";
 import type {
 	OAuthConfig,
 	OAuthToken,
@@ -174,7 +175,7 @@ export abstract class Oauth2Driver implements TransitDriver {
 			body.set("client_secret", this.config.clientSecret);
 		}
 
-		const response = await fetch(this.accessTokenUrl, {
+		const response = await fetchWithTimeout(this.accessTokenUrl, {
 			method: "POST",
 			headers,
 			body,
@@ -228,7 +229,7 @@ export abstract class Oauth2Driver implements TransitDriver {
 		params: Record<string, string> = {},
 	): Promise<unknown> {
 		const query = new URLSearchParams(params).toString();
-		const response = await fetch(query ? `${url}?${query}` : url, {
+		const response = await fetchWithTimeout(query ? `${url}?${query}` : url, {
 			headers: {
 				Authorization: `Bearer ${accessToken}`,
 				Accept: "application/json",

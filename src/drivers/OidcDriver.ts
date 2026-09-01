@@ -13,6 +13,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { fetchWithTimeout } from "../httpTimeout.js";
 import {
 	assertIdTokenClaims,
 	decodeJws,
@@ -211,7 +212,7 @@ export class OidcDriver implements TransitDriver {
 			// Only when a challenge was actually sent.
 			...(verifier === "" ? {} : { code_verifier: verifier }),
 		});
-		const response = await fetch(metadata.token_endpoint, {
+		const response = await fetchWithTimeout(metadata.token_endpoint, {
 			method: "POST",
 			headers: {
 				Accept: "application/json",
@@ -320,7 +321,7 @@ export class OidcDriver implements TransitDriver {
 		endpoint: string,
 		accessToken: string,
 	): Promise<Record<string, unknown>> {
-		const response = await fetch(endpoint, {
+		const response = await fetchWithTimeout(endpoint, {
 			headers: {
 				Authorization: `Bearer ${accessToken}`,
 				Accept: "application/json",

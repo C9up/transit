@@ -9,6 +9,7 @@
  * middle is a rate limit.
  */
 
+import { fetchWithTimeout } from "./httpTimeout.js";
 import type { Jwk } from "./jwt.js";
 
 /** The slice of the discovery document this reads. */
@@ -79,7 +80,7 @@ export class OidcDiscovery {
 	}
 
 	async #fetch(): Promise<OidcMetadata> {
-		const response = await fetch(this.url, {
+		const response = await fetchWithTimeout(this.url, {
 			headers: { Accept: "application/json" },
 		});
 		if (!response.ok) {
@@ -130,7 +131,7 @@ export class JwksCache {
 			);
 		}
 
-		await this.#fetch(uri);
+		await this.#fetchKeys(uri);
 		const refreshed = this.#find(kid);
 		if (!refreshed) {
 			throw new Error(
@@ -149,7 +150,7 @@ export class JwksCache {
 		return usable.length === 1 ? usable[0] : undefined;
 	}
 
-	async #fetch(uri: string): Promise<Jwk[]> {
+	async #fetchKeys(uri: string): Promise<Jwk[]> {
 		this.#inFlight ??= this.#fetchOnce(uri).finally(() => {
 			this.#inFlight = undefined;
 		});
@@ -157,7 +158,7 @@ export class JwksCache {
 	}
 
 	async #fetchOnce(uri: string): Promise<Jwk[]> {
-		const response = await fetch(uri, {
+		const response = await fetchWithTimeout(uri, {
 			headers: { Accept: "application/json" },
 		});
 		if (!response.ok) {

@@ -18,6 +18,7 @@
  * the secret kept from `begin()`.
  */
 
+import { fetchWithTimeout } from "./httpTimeout.js";
 import {
 	authorizationHeader,
 	baseOauthParams,
@@ -156,7 +157,7 @@ export abstract class Oauth1Driver implements TransitDriver {
 		const query = new URLSearchParams(params).toString();
 		const url = query ? `${this.userInfoUrl}?${query}` : this.userInfoUrl;
 
-		const response = await fetch(url, {
+		const response = await fetchWithTimeout(url, {
 			headers: {
 				Authorization: authorizationHeader({
 					method: "GET",
@@ -192,7 +193,7 @@ export abstract class Oauth1Driver implements TransitDriver {
 		oauth: Param[],
 		tokenSecret?: string,
 	): Promise<Record<string, string>> {
-		const response = await fetch(url, {
+		const response = await fetchWithTimeout(url, {
 			method: "POST",
 			headers: {
 				Authorization: authorizationHeader({
