@@ -6,7 +6,7 @@
  * long as the socket lived — and an identity provider is the one dependency an
  * application cannot route around.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DEFAULT_TIMEOUT_MS, fetchWithTimeout } from "../../src/httpTimeout.js";
 
 describe("transit > fetchWithTimeout", () => {
