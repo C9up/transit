@@ -1,6 +1,6 @@
 {
   "name": "@c9up/transit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Transit \u2014 federated sign-in for the Ream framework: SAML 2.0, LDAP, OpenID Connect, OAuth1, OAuth2",
   "license": "MIT",
   "type": "module",
