@@ -235,6 +235,26 @@ describe("transit > dsig > the key", () => {
 		).toBe("Assertion");
 	});
 
+	// KeyInfo is optional in XML-DSIG and a good number of providers leave it
+	// out. The key then has to come from the metadata alone — and during a
+	// rotation the metadata lists two, either of which may be the signer.
+	it("accepts a rotation when the document names no certificate", () => {
+		const next = readFileSync(join(fixtures, "other-cert.pem"), "utf8");
+		const withoutKeyInfo = sign(template, "a-1").replace(
+			/<ds:KeyInfo>.*<\/ds:KeyInfo>/,
+			"",
+		);
+
+		// The signature covers SignedInfo, and the digest covers the assertion
+		// with the whole Signature omitted, so dropping KeyInfo invalidates
+		// neither. Only the key lookup changes.
+		expect(
+			verifyXmlSignature(parseXml(withoutKeyInfo), {
+				certificates: [next, certificate],
+			}).local,
+		).toBe("Assertion");
+	});
+
 	it("refuses to run with no certificate at all", () => {
 		// Verifying a document against a key it carries is verifying it against
 		// itself.

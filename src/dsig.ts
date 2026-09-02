@@ -164,12 +164,15 @@ export function verifyXmlSignature(
 		"base64",
 	);
 
-	const key = resolveKey(signature, options.certificates);
-	const holds = verifySignature(
-		spec.hash,
-		signedBytes,
-		spec.kind === "ec" ? { key, dsaEncoding: "ieee-p1363" } : key,
-		signatureValue,
+	// `some` stops at the first key that holds. Any of the provider's listed
+	// certificates is an acceptable signer; none of them is attacker-supplied.
+	const holds = resolveKeys(signature, options.certificates).some((key) =>
+		verifySignature(
+			spec.hash,
+			signedBytes,
+			spec.kind === "ec" ? { key, dsaEncoding: "ieee-p1363" } : key,
+			signatureValue,
+		),
 	);
 	if (!holds) {
 		throw new SignatureError("the signature does not verify");
@@ -318,13 +321,23 @@ function readTransforms(
 }
 
 /**
- * The key to verify with — the caller's, from the provider's metadata.
+ * The keys to verify with — the caller's, from the provider's metadata.
  *
- * When the document carries a certificate it must be one of them. That check
- * gives a clear error instead of an opaque "does not verify" when a provider
- * has rotated and the metadata has not been updated.
+ * When the document carries a certificate it must be one of them, and that one
+ * alone is returned. The check gives a clear error instead of an opaque "does
+ * not verify" when a provider has rotated and the metadata has not been
+ * updated.
+ *
+ * Without one, every certificate the metadata lists is a candidate. A provider
+ * mid-rotation publishes the outgoing and the incoming certificate together and
+ * signs with either; trying only the first would reject every assertion signed
+ * with the other, for the whole rotation window, under a message blaming the
+ * signature. `certificates` is plural for this reason.
  */
-function resolveKey(signature: XmlElement, certificates: string[]): KeyObject {
+function resolveKeys(
+	signature: XmlElement,
+	certificates: string[],
+): KeyObject[] {
 	if (certificates.length === 0) {
 		throw new SignatureError(
 			"no certificate was supplied — the key has to come from the provider's metadata, never from the document itself",
@@ -339,11 +352,9 @@ function resolveKey(signature: XmlElement, certificates: string[]): KeyObject {
 				"the document is signed with a certificate the provider's metadata does not list",
 			);
 		}
-		return match.publicKey;
+		return [match.publicKey];
 	}
-	// No certificate in the document: the metadata is all there is, which is
-	// the safer of the two cases.
-	return (known[0] as X509Certificate).publicKey;
+	return known.map((cert) => cert.publicKey);
 }
 
 function embeddedCertificate(

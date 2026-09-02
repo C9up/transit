@@ -2,6 +2,7 @@
  * The shapes every provider answers with, whatever protocol it speaks.
  */
 
+import { timingSafeEqual } from "node:crypto";
 export interface OAuthConfig {
 	clientId: string;
 	clientSecret: string;
@@ -144,7 +145,25 @@ export function assertOAuthState(
 				"Store the state given to redirectUrl() in the session and pass it here.",
 		);
 	}
-	if (state !== expectedState) {
+	if (state === undefined || !sameSecret(state, expectedState)) {
 		throw new Error("OAuth state mismatch — possible CSRF attack");
 	}
+}
+
+/**
+ * Compare two states without leaking where they diverge.
+ *
+ * `!==` on strings stops at the first differing byte, and the state is the only
+ * thing standing between an attacker's authorization code and the victim's
+ * session. The leak is small against network noise, but every other secret
+ * comparison in the framework is already constant-time and this one is the
+ * outlier.
+ *
+ * The lengths are checked first because `timingSafeEqual` throws when they
+ * differ. A state's length is not the secret; its content is.
+ */
+function sameSecret(given: string, expected: string): boolean {
+	const left = Buffer.from(given, "utf8");
+	const right = Buffer.from(expected, "utf8");
+	return left.length === right.length && timingSafeEqual(left, right);
 }
