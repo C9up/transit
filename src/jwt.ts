@@ -113,7 +113,7 @@ export function verifyJwsSignature(
 ): boolean {
 	const spec = SUPPORTED[alg];
 	assertKeyMatchesAlg(jwk, alg);
-	const key = createPublicKey({ key: jwk as never, format: "jwk" });
+	const key = createPublicKey({ key: jwk, format: "jwk" });
 
 	const data = Buffer.from(parts.signingInput, "ascii");
 	if (spec.kind === "ec") {
@@ -173,7 +173,7 @@ export function assertIdTokenClaims(
 	const now = expected.now ?? Math.floor(Date.now() / 1000);
 
 	const iss = payload.iss;
-	if (iss !== expected.issuer) {
+	if (typeof iss !== "string" || iss !== expected.issuer) {
 		throw new Error(
 			`[transit] id_token issuer mismatch: expected '${expected.issuer}'`,
 		);
@@ -185,6 +185,14 @@ export function assertIdTokenClaims(
 	}
 
 	const aud = payload.aud;
+	if (!isAudience(aud)) {
+		// Checked, not assumed: `includes` below would pass on a list holding the
+		// right string among arbitrary junk, and the claim would then be handed
+		// on described as a string it is not.
+		throw new Error(
+			"[transit] id_token audience is not a string or a list of strings",
+		);
+	}
 	const audiences = Array.isArray(aud) ? aud : [aud];
 	if (!audiences.includes(expected.audience)) {
 		throw new Error(
@@ -221,7 +229,17 @@ export function assertIdTokenClaims(
 		throw new Error("[transit] id_token nonce does not match this sign-in");
 	}
 
-	return payload as unknown as IdTokenClaims;
+	// Built from the locals each check narrowed, not asserted over the bag it
+	// came from. The cast that used to stand here promised `iss`, `sub`, `aud`
+	// and `exp` were strings and numbers on the strength of the checks above —
+	// and `iss` was never actually type-checked, only compared.
+	return { ...payload, iss, sub, aud, exp };
+}
+
+/** An `aud` claim, in the two shapes the spec allows. */
+function isAudience(value: unknown): value is string | string[] {
+	if (typeof value === "string") return true;
+	return Array.isArray(value) && value.every((one) => typeof one === "string");
 }
 
 function decodeSegment(segment: string, what: string): Record<string, unknown> {

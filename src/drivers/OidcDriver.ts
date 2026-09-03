@@ -306,7 +306,7 @@ export class OidcDriver implements TransitDriver {
 			!metadata.userinfo_endpoint ||
 			accessToken === ""
 		) {
-			return claims as unknown as Record<string, unknown>;
+			return { ...claims };
 		}
 		const info = await this.#userinfo(metadata.userinfo_endpoint, accessToken);
 		if (info.sub !== claims.sub) {
@@ -314,7 +314,7 @@ export class OidcDriver implements TransitDriver {
 				"[transit] the userinfo response describes a different subject than the id_token",
 			);
 		}
-		return { ...(claims as unknown as Record<string, unknown>), ...info };
+		return { ...claims, ...info };
 	}
 
 	async #userinfo(

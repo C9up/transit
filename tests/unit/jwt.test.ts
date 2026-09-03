@@ -249,3 +249,35 @@ describe("transit > jwt > the key has to match the algorithm", () => {
 		);
 	});
 });
+
+describe("transit > jwt > claims that are not the type they are read as", () => {
+	it("refuses an audience list holding anything but strings", () => {
+		// `includes` alone passes here: the expected audience IS in the list. The
+		// claim would then be handed on typed `string[]` while carrying a number,
+		// and whatever read it next would be the one to find out.
+		expect(() =>
+			assertIdTokenClaims({ ...claims, aud: ["client-1", 42] }, expected),
+		).toThrow(/audience is not a string/);
+	});
+
+	it("refuses an audience that is an object", () => {
+		expect(() =>
+			assertIdTokenClaims({ ...claims, aud: { client: "client-1" } }, expected),
+		).toThrow(/audience is not a string/);
+	});
+
+	it("refuses an issuer that is not a string", () => {
+		expect(() =>
+			assertIdTokenClaims({ ...claims, iss: 1234 }, expected),
+		).toThrow(/issuer mismatch/);
+	});
+
+	it("returns the claims it checked, typed as it checked them", () => {
+		const checked = assertIdTokenClaims(claims, expected);
+
+		expect(typeof checked.iss).toBe("string");
+		expect(typeof checked.sub).toBe("string");
+		expect(typeof checked.exp).toBe("number");
+		expect(checked.aud).toBe("client-1");
+	});
+});
