@@ -19,6 +19,13 @@ import { TwitterXDriver } from "../../src/drivers/TwitterXDriver.js";
 import { createCodeVerifier } from "../../src/Oauth2Driver.js";
 import type { OAuthConfig } from "../../src/types.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 const config: OAuthConfig = {
 	clientId: "cid",
 	clientSecret: "secret",
@@ -136,7 +143,7 @@ describe("transit > social drivers > PKCE", () => {
 		);
 		await new TwitterXDriver(config).callback("code", "s", "s", "verifier-x");
 
-		expect(body(calls[0]).get("code_verifier")).toBe("verifier-x");
+		expect(body(defined(calls[0])).get("code_verifier")).toBe("verifier-x");
 	});
 
 	it("mints a verifier long enough for every provider", () => {
@@ -156,8 +163,8 @@ describe("transit > social drivers > how the client authenticates", () => {
 		);
 		await new DiscordDriver(config).callback("code", "s", "s");
 
-		expect(body(calls[0]).get("client_secret")).toBe("secret");
-		expect(calls[0].init?.headers).not.toHaveProperty("Authorization");
+		expect(body(defined(calls[0])).get("client_secret")).toBe("secret");
+		expect(defined(calls[0]).init?.headers).not.toHaveProperty("Authorization");
 	});
 
 	it("sends Basic credentials, and no secret in the body, where required", async () => {
@@ -167,12 +174,12 @@ describe("transit > social drivers > how the client authenticates", () => {
 		);
 		await new SpotifyDriver(config).callback("code", "s", "s");
 
-		const headers = calls[0].init?.headers as Record<string, string>;
+		const headers = defined(calls[0]).init?.headers as Record<string, string>;
 		expect(headers.Authorization).toBe(
 			`Basic ${Buffer.from("cid:secret").toString("base64")}`,
 		);
 		// Both at once is what these providers reject outright.
-		expect(body(calls[0]).get("client_secret")).toBeNull();
+		expect(body(defined(calls[0])).get("client_secret")).toBeNull();
 	});
 
 	it("binds the code to the callback URL it was issued for", async () => {
@@ -182,8 +189,8 @@ describe("transit > social drivers > how the client authenticates", () => {
 		);
 		await new DiscordDriver(config).callback("code", "s", "s");
 
-		expect(body(calls[0]).get("redirect_uri")).toBe("https://app.test/cb");
-		expect(body(calls[0]).get("grant_type")).toBe("authorization_code");
+		expect(body(defined(calls[0])).get("redirect_uri")).toBe("https://app.test/cb");
+		expect(body(defined(calls[0])).get("grant_type")).toBe("authorization_code");
 	});
 
 	it("keeps the refresh token and the lifetime when the provider issues them", async () => {
@@ -249,7 +256,7 @@ describe("transit > social drivers > reading the profile", () => {
 		);
 		const out = await new FacebookDriver(config).callback("code", "s", "s");
 
-		expect(calls[1].url).toContain("fields=");
+		expect(defined(calls[1]).url).toContain("fields=");
 		expect(out.user.avatarUrl).toBe("https://cdn/ada.png");
 		expect(out.user.name).toBe("Ada");
 	});
@@ -410,7 +417,7 @@ describe("transit > social drivers > GitHub private addresses", () => {
 
 		// Most accounts keep the address private, so /user returns null and the
 		// sign-in would otherwise arrive with no address at all.
-		expect(calls[2].url).toContain("/user/emails");
+		expect(defined(calls[2]).url).toContain("/user/emails");
 		expect(out.user.email).toBe("ada@acme.test");
 		expect(out.user.emailVerificationState).toBe("verified");
 	});
@@ -463,7 +470,7 @@ describe("transit > social drivers > a token already held", () => {
 
 		// One call: the profile. No token endpoint involved.
 		expect(calls).toHaveLength(1);
-		expect(calls[0].url).toContain("api.spotify.com");
+		expect(defined(calls[0]).url).toContain("api.spotify.com");
 		expect(user.name).toBe("Ada");
 	});
 });

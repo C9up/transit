@@ -8,6 +8,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { socials } from "../../src/config.js";
 import { TwitterDriver } from "../../src/drivers/TwitterDriver.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 const config = {
 	clientId: "cid",
 	clientSecret: "secret",
@@ -32,9 +39,21 @@ function stubFetch(...replies: Reply[]) {
 	return calls;
 }
 
-/** The Authorization header of a recorded call. */
+/**
+ * The Authorization header of a recorded call.
+ *
+ * Read through the shapes `HeadersInit` actually allows rather than asserted
+ * into one of them: the stub records whatever the driver passed, and a cast
+ * would describe it instead of checking it.
+ */
 function auth(call: { init?: RequestInit }): string {
-	return (call.init?.headers as Record<string, string>).Authorization;
+	const headers = call.init?.headers;
+	if (headers instanceof Headers) return headers.get("Authorization") ?? "";
+	if (Array.isArray(headers)) {
+		const found = headers.find(([name]) => name === "Authorization");
+		return found?.[1] ?? "";
+	}
+	return headers?.Authorization ?? "";
 }
 
 const requestToken: Reply = {
@@ -57,8 +76,8 @@ describe("transit > Twitter (OAuth1) > begin", () => {
 		const calls = stubFetch(requestToken);
 		const started = await new TwitterDriver(config).begin();
 
-		expect(calls[0].url).toBe("https://api.twitter.com/oauth/request_token");
-		expect(calls[0].init?.method).toBe("POST");
+		expect(defined(calls[0]).url).toBe("https://api.twitter.com/oauth/request_token");
+		expect(defined(calls[0]).init?.method).toBe("POST");
 		expect(started.url).toBe(
 			"https://api.twitter.com/oauth/authenticate?oauth_token=rt",
 		);
@@ -72,7 +91,7 @@ describe("transit > Twitter (OAuth1) > begin", () => {
 		const calls = stubFetch(requestToken);
 		await new TwitterDriver(config).begin();
 
-		const header = auth(calls[0]);
+		const header = auth(defined(calls[0]));
 		expect(header).toContain('oauth_callback="https%3A%2F%2Fapp.test%2Fcb"');
 		expect(header).toContain('oauth_consumer_key="cid"');
 		expect(header).toContain("oauth_signature=");
@@ -136,12 +155,12 @@ describe("transit > Twitter (OAuth1) > callback", () => {
 			"rts",
 		);
 
-		expect(calls[0].url).toBe("https://api.twitter.com/oauth/access_token");
-		expect(auth(calls[0])).toContain('oauth_verifier="verifier"');
-		expect(auth(calls[0])).toContain('oauth_token="rt"');
+		expect(defined(calls[0]).url).toBe("https://api.twitter.com/oauth/access_token");
+		expect(auth(defined(calls[0]))).toContain('oauth_verifier="verifier"');
+		expect(auth(defined(calls[0]))).toContain('oauth_token="rt"');
 
 		// The address only arrives when it is asked for.
-		expect(calls[1].url).toContain("include_email=true");
+		expect(defined(calls[1]).url).toContain("include_email=true");
 
 		expect(out.user.id).toBe("42");
 		expect(out.user.nickName).toBe("kaen");
@@ -197,7 +216,7 @@ describe("transit > Twitter (OAuth1) > a token already held", () => {
 		const user = await new TwitterDriver(config).userFromToken("at", "ats");
 
 		expect(calls).toHaveLength(1);
-		expect(auth(calls[0])).toContain('oauth_token="at"');
+		expect(auth(defined(calls[0]))).toContain('oauth_token="at"');
 		expect(user.nickName).toBe("kaen");
 	});
 });
