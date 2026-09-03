@@ -25,7 +25,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 const config: OAuthConfig = {
 	clientId: "cid",
 	clientSecret: "secret",
@@ -189,8 +188,12 @@ describe("transit > social drivers > how the client authenticates", () => {
 		);
 		await new DiscordDriver(config).callback("code", "s", "s");
 
-		expect(body(defined(calls[0])).get("redirect_uri")).toBe("https://app.test/cb");
-		expect(body(defined(calls[0])).get("grant_type")).toBe("authorization_code");
+		expect(body(defined(calls[0])).get("redirect_uri")).toBe(
+			"https://app.test/cb",
+		);
+		expect(body(defined(calls[0])).get("grant_type")).toBe(
+			"authorization_code",
+		);
 	});
 
 	it("keeps the refresh token and the lifetime when the provider issues them", async () => {

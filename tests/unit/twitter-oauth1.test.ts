@@ -14,7 +14,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 const config = {
 	clientId: "cid",
 	clientSecret: "secret",
@@ -76,7 +75,9 @@ describe("transit > Twitter (OAuth1) > begin", () => {
 		const calls = stubFetch(requestToken);
 		const started = await new TwitterDriver(config).begin();
 
-		expect(defined(calls[0]).url).toBe("https://api.twitter.com/oauth/request_token");
+		expect(defined(calls[0]).url).toBe(
+			"https://api.twitter.com/oauth/request_token",
+		);
 		expect(defined(calls[0]).init?.method).toBe("POST");
 		expect(started.url).toBe(
 			"https://api.twitter.com/oauth/authenticate?oauth_token=rt",
@@ -155,7 +156,9 @@ describe("transit > Twitter (OAuth1) > callback", () => {
 			"rts",
 		);
 
-		expect(defined(calls[0]).url).toBe("https://api.twitter.com/oauth/access_token");
+		expect(defined(calls[0]).url).toBe(
+			"https://api.twitter.com/oauth/access_token",
+		);
 		expect(auth(defined(calls[0]))).toContain('oauth_verifier="verifier"');
 		expect(auth(defined(calls[0]))).toContain('oauth_token="rt"');
 
