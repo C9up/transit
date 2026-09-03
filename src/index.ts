@@ -6,6 +6,8 @@
  * that speak them.
  */
 
+import "./augmentations.js";
+
 export { type AppleKey, appleClientSecret, parseAppleUser } from "./apple.js";
 export { type CanonicalizeOptions, canonicalize } from "./c14n.js";
 export type {

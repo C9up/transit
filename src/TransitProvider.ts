@@ -6,6 +6,7 @@
  * usable from a host that is not Ream.
  */
 
+import "./augmentations.js";
 import type { TransitConfig } from "./config.js";
 import { setTransit } from "./services/main.js";
 import { TransitManager } from "./TransitManager.js";
