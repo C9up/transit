@@ -16,6 +16,7 @@ import { socials } from "../../src/config.js";
 import { AppleDriver } from "../../src/drivers/AppleDriver.js";
 import type { Jwk } from "../../src/jwt.js";
 import { decodeJws, verifyJwsSignature } from "../../src/jwt.js";
+import { formBody } from "../__helpers__/defined.js";
 
 const ISSUER = "https://appleid.apple.com";
 const CLIENT = "com.acme.web";
@@ -191,7 +192,7 @@ describe("transit > apple > the flow", () => {
 		const exchange = calls.find((call) =>
 			call.url.startsWith(`${ISSUER}/auth/token`),
 		);
-		const sent = (exchange?.init?.body as URLSearchParams).get("client_secret");
+		const sent = formBody(exchange).get("client_secret");
 		expect(decodeJws(sent as string).payload.iss).toBe("TEAM123456");
 
 		expect(user.id).toBe("000123.abc.0001");

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { oidc } from "../../src/config.js";
 import { type OidcConfig, OidcDriver } from "../../src/drivers/OidcDriver.js";
 import type { Jwk } from "../../src/jwt.js";
+import { formBody } from "../__helpers__/defined.js";
 
 const ISSUER = "https://id.acme.test";
 const CLIENT = "client-1";
@@ -149,9 +150,7 @@ describe("transit > oidc > begin", () => {
 		const exchange = calls.find((call) =>
 			call.url.startsWith(`${ISSUER}/token`),
 		);
-		expect(
-			(exchange?.init?.body as URLSearchParams).get("code_verifier"),
-		).toBeNull();
+		expect(formBody(exchange).get("code_verifier")).toBeNull();
 	});
 
 	it("refuses a secret that did not come from begin()", async () => {
