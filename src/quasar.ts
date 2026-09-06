@@ -1,64 +1,27 @@
 /**
  * Resolving a Redis connection by name, from `@c9up/quasar`.
  *
- * Transit does not depend on quasar: it is an optional peer, and this module
- * never imports it statically — the specifier is built at runtime so the
- * TypeScript build stays free of it too.
+ * The loading, the shape check and the messages are the same in every package
+ * that offers a Redis-backed option, so they are vendored rather than written
+ * again: `src/vendor/quasarConnection.ts`, generated from one source. What is
+ * specific stays at the call site — transit has several stores, each issuing
+ * its own commands, so unlike its siblings it passes them per call rather than
+ * fixing one list here.
  */
 
-interface ConnectionSource {
-	connection(name?: string): unknown;
-}
+import { quasarConnection as loadQuasarConnection } from "./vendor/quasarConnection.js";
 
-function isConnectionSource(value: unknown): value is ConnectionSource {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		typeof Reflect.get(value, "connection") === "function"
-	);
-}
-
-/**
- * The named connection, checked for the commands the caller needs before it is
- * handed over — a connection missing one would fail on the first sign-in, far
- * from the cause.
- */
+/** The named connection, checked for the commands the caller will issue. */
 export async function quasarConnection<T>(
 	name: string | undefined,
 	required: readonly string[],
 	what: string,
 ): Promise<T> {
-	const specifier = "@c9up/quasar/services/main";
-	let loaded: unknown;
-	try {
-		loaded = await import(/* @vite-ignore */ specifier);
-	} catch (cause) {
-		throw new Error(
-			`[transit] naming a Redis connection needs @c9up/quasar, which is not installed.\n  pnpm add @c9up/quasar`,
-			{ cause },
-		);
-	}
-
-	const manager = isConnectionSource(loaded)
-		? loaded
-		: Reflect.get(Object(loaded), "default");
-	if (!isConnectionSource(manager)) {
-		throw new Error(
-			"[transit] @c9up/quasar/services/main did not expose a connection() manager",
-		);
-	}
-
-	const connection = manager.connection(name);
-	const missing = required.filter(
-		(command) =>
-			typeof connection !== "object" ||
-			connection === null ||
-			typeof Reflect.get(connection, command) !== "function",
-	);
-	if (missing.length > 0) {
-		throw new Error(
-			`[transit] the quasar connection${name ? ` '${name}'` : ""} is missing ${missing.join(", ")}, which ${what} issues`,
-		);
-	}
-	return connection as T;
+	return loadQuasarConnection<T>({
+		pkg: "transit",
+		name,
+		required,
+		what,
+		raise: (_reason, message, cause) => new Error(message, { cause }),
+	});
 }
