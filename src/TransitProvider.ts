@@ -8,7 +8,7 @@
 
 import "./augmentations.js";
 import type { TransitConfig } from "./config.js";
-import { setTransit } from "./services/main.js";
+import { clearTransit, getTransit, setTransit } from "./services/main.js";
 import { TransitManager } from "./TransitManager.js";
 
 interface TransitContainer {
@@ -26,6 +26,9 @@ export interface TransitAppContext {
 }
 
 export default class TransitProvider {
+	/** The manager this provider seated, so shutdown only clears its own. */
+	#manager: TransitManager | undefined;
+
 	constructor(protected app: TransitAppContext) {}
 
 	register(): void {
@@ -45,8 +48,20 @@ export default class TransitProvider {
 	}
 
 	async boot(): Promise<void> {
-		setTransit(
-			await this.app.container.resolve<TransitManager>(TransitManager),
-		);
+		const manager =
+			await this.app.container.resolve<TransitManager>(TransitManager);
+		this.#manager = manager;
+		setTransit(manager);
+	}
+
+	async shutdown(): Promise<void> {
+		// Release the module-level singleton, while it is still ours. A stopped
+		// application left a dead TransitManager reachable through
+		// `services/main` — and this one holds the SSO providers, so a stale one
+		// answers sign-ins for an application that no longer exists.
+		if (this.#manager !== undefined && getTransit() === this.#manager) {
+			clearTransit();
+		}
+		this.#manager = undefined;
 	}
 }

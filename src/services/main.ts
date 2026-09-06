@@ -15,7 +15,19 @@ export function setTransit(manager: TransitManager): void {
 	instance = manager;
 }
 
-/** @internal Test helper — forget the manager between cases. */
+/** @internal Read the seated manager, if there is one. */
+export function getTransit(): TransitManager | undefined {
+	return instance;
+}
+
+/**
+ * @internal Forget the manager — called by the provider on shutdown, and by
+ * tests between cases.
+ *
+ * The caller checks ownership first (`getTransit() === mine`): two applications
+ * share this module in one process, and the one shutting down must not clear a
+ * manager the other has since seated.
+ */
 export function clearTransit(): void {
 	instance = undefined;
 }

@@ -117,3 +117,40 @@ describe("transit > provider", () => {
 		expect(socials.google(credentials)()).toBeInstanceOf(GoogleDriver);
 	});
 });
+
+describe("transit > provider > shutdown", () => {
+	it("releases the services/main singleton it seated", async () => {
+		const { getTransit } = await import("../../src/services/main.js");
+		const { app } = makeApp({});
+		const provider = new TransitProvider(app);
+		provider.register();
+		await provider.boot();
+		expect(getTransit()).toBeInstanceOf(TransitManager);
+
+		await provider.shutdown();
+
+		// A stopped application left a live TransitManager reachable through
+		// `services/main` — and this one holds the SSO providers, so a stale one
+		// answers sign-ins for an application that no longer exists.
+		expect(getTransit()).toBeUndefined();
+	});
+
+	it("leaves a manager another application has since seated alone", async () => {
+		const { getTransit } = await import("../../src/services/main.js");
+		const { app } = makeApp({});
+		const provider = new TransitProvider(app);
+		provider.register();
+		await provider.boot();
+
+		const second = makeApp({});
+		const other = new TransitProvider(second.app);
+		other.register();
+		await other.boot();
+		const replacement = getTransit();
+		if (!replacement) throw new Error("expected the second boot to seat one");
+
+		await provider.shutdown();
+
+		expect(getTransit()).toBe(replacement);
+	});
+});
