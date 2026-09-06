@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 import { verifyXmlSignature } from "../dsig.js";
-import { inProduction } from "../nodeEnv.js";
+import { inProduction } from "../vendor/nodeEnv.js";
 import {
 	type AssertionReplayStore,
 	MemoryAssertionReplayStore,
