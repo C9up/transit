@@ -14,7 +14,6 @@
 import { randomUUID } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 import { verifyXmlSignature } from "../dsig.js";
-import { inProduction } from "../vendor/nodeEnv.js";
 import {
 	type AssertionReplayStore,
 	MemoryAssertionReplayStore,
@@ -33,6 +32,7 @@ import type {
 	TransitUser,
 } from "../types.js";
 import { assertOAuthState } from "../types.js";
+import { inProduction } from "../vendor/nodeEnv.js";
 import { parseXml } from "../xml.js";
 
 const PROTOCOL_NS = "urn:oasis:names:tc:SAML:2.0:protocol";
