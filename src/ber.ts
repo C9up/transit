@@ -117,6 +117,16 @@ export function decodeString(value: Buffer): string {
 }
 
 /**
+ * The largest message this will agree to assemble.
+ *
+ * A four-byte length header can declare 4 GiB, and the declaration arrives
+ * before any of the bytes do — so a five-byte reply could make the client sit
+ * on a growing buffer until the process died. A directory response is
+ * kilobytes; 8 MiB is generous for a paged search and still bounded.
+ */
+export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+
+/**
  * How many bytes a whole message occupies, or `undefined` while it is still
  * arriving. LDAP runs over a stream, so a read can stop anywhere.
  */
@@ -133,7 +143,15 @@ export function messageLength(buffer: Buffer): number | undefined {
 	for (let i = 0; i < count; i += 1) {
 		length = length * 256 + (buffer[2 + i] as number);
 	}
-	return 2 + count + length;
+	const total = 2 + count + length;
+	// Refused on the DECLARATION, not once the bytes have arrived: the point is
+	// never to buffer them.
+	if (total > MAX_MESSAGE_BYTES) {
+		throw new BerError(
+			`a message declares ${total} bytes, over the ${MAX_MESSAGE_BYTES} allowed`,
+		);
+	}
+	return total;
 }
 
 function encodeLength(length: number): Buffer {

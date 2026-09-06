@@ -188,6 +188,11 @@ export class SamlDriver implements TransitDriver {
 			);
 		}
 
+		// Parsed before anything is verified, because the signature is INSIDE the
+		// document — so these are bytes an unauthenticated caller chose, and the
+		// parser's limits (length, depth, node and attribute counts) are what
+		// stands between a POST and the heap or the stack. The defaults are sized
+		// for SAML: a large response is tens of kilobytes.
 		const document = parseXml(decode(code));
 		if (
 			document.namespaceUri !== PROTOCOL_NS ||

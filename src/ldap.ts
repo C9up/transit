@@ -33,6 +33,7 @@ import {
 	encodeInteger,
 	encodeSequence,
 	encodeString,
+	MAX_MESSAGE_BYTES,
 	messageLength,
 	OCTET_STRING,
 } from "./ber.js";
@@ -255,6 +256,22 @@ export class LdapConnection {
 
 	#receive(chunk: Buffer): void {
 		this.#buffer = Buffer.concat([this.#buffer, chunk]);
+		// A stream that never completes a message must not grow the buffer
+		// forever. `messageLength` refuses an oversized DECLARATION, but a peer
+		// can also just keep sending bytes that never form one — the length
+		// header itself is only read once two bytes are in hand.
+		if (this.#buffer.length > MAX_MESSAGE_BYTES) {
+			this.#buffer = Buffer.alloc(0);
+			// The socket goes too: a peer that behaves this way is not one to keep
+			// reading from, and closing it is what stops the flood.
+			this.#socket?.destroy();
+			this.#failAll(
+				new LdapError(
+					`the directory sent more than ${MAX_MESSAGE_BYTES} bytes without completing a message`,
+				),
+			);
+			return;
+		}
 		for (;;) {
 			const length = messageLength(this.#buffer);
 			if (length === undefined || this.#buffer.length < length) return;

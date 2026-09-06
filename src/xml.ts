@@ -74,13 +74,48 @@ class XmlError extends Error {
 	}
 }
 
+/**
+ * What a document is allowed to cost.
+ *
+ * A SAML response is parsed BEFORE its signature is checked — it has to be,
+ * since the signature is inside it — so every one of these bounds applies to
+ * bytes an unauthenticated caller chose. Without them a single POST could
+ * exhaust the heap, or nest deeply enough to overflow the stack in `#element`,
+ * which recurses once per level.
+ */
+export interface XmlLimits {
+	/** Characters in the document. Default 1 MiB — a large SAML response is tens of KiB. */
+	maxLength?: number;
+	/** Nesting levels. Default 100; the recursion is one frame per level. */
+	maxDepth?: number;
+	/** Elements, text runs, comments and instructions, together. Default 50 000. */
+	maxNodes?: number;
+	/** Attributes on one element. Default 256. */
+	maxAttributes?: number;
+}
+
+const DEFAULT_LIMITS: Required<XmlLimits> = {
+	maxLength: 1024 * 1024,
+	maxDepth: 100,
+	maxNodes: 50_000,
+	maxAttributes: 256,
+};
+
 /** Parse a document and return its root element. */
-export function parseXml(source: string): XmlElement {
+export function parseXml(source: string, limits?: XmlLimits): XmlElement {
+	const resolved = { ...DEFAULT_LIMITS, ...limits };
+	// Checked before the copy below, not after: normalising duplicates the whole
+	// string, so a 300 MB body cost 600 MB before anything looked at its size.
+	if (source.length > resolved.maxLength) {
+		throw new XmlError(
+			`the document is ${source.length} characters, over the ${resolved.maxLength} allowed`,
+		);
+	}
 	// Line endings are normalised before parsing, as the canonicalization
 	// specification requires — otherwise the same document signed on one
 	// platform digests differently on another.
 	const input = source.replace(/\r\n?/g, "\n");
-	const parser = new Parser(input);
+	const parser = new Parser(input, resolved);
 	return parser.document();
 }
 
@@ -151,7 +186,22 @@ export function textOf(element: XmlElement): string {
 
 class Parser {
 	#at = 0;
-	constructor(private readonly source: string) {}
+	/** Nodes built so far, across the whole document. */
+	#nodes = 0;
+	constructor(
+		private readonly source: string,
+		private readonly limits: Required<XmlLimits>,
+	) {}
+
+	/** Count one node, and refuse a document that keeps producing them. */
+	#node(): void {
+		this.#nodes += 1;
+		if (this.#nodes > this.limits.maxNodes) {
+			throw new XmlError(
+				`the document has more than ${this.limits.maxNodes} nodes`,
+			);
+		}
+	}
 
 	document(): XmlElement {
 		let root: XmlElement | undefined;
@@ -184,7 +234,17 @@ class Parser {
 		return root;
 	}
 
-	#element(parent: XmlElement | undefined): XmlElement {
+	#element(parent: XmlElement | undefined, depth = 0): XmlElement {
+		// Checked on the way IN: `#element` recurses once per level, so a
+		// document nested deeply enough overflowed the stack before any of this
+		// ran — and the stack it overflows is the one holding the signature check
+		// that has not happened yet.
+		if (depth > this.limits.maxDepth) {
+			throw new XmlError(
+				`the document nests deeper than ${this.limits.maxDepth}`,
+			);
+		}
+		this.#node();
 		this.#expect("<");
 		const qname = this.#name();
 		const element: XmlElement = {
@@ -210,6 +270,11 @@ class Parser {
 			this.#expect("=");
 			this.#skipSpace();
 			raw.push({ qname: name, value: this.#attributeValue() });
+			if (raw.length > this.limits.maxAttributes) {
+				throw new XmlError(
+					`element <${qname}> carries more than ${this.limits.maxAttributes} attributes`,
+				);
+			}
 		}
 
 		for (const { qname: name, value } of raw) {
@@ -289,6 +354,7 @@ class Parser {
 			if (this.#peek("<!--")) {
 				const end = this.source.indexOf("-->", this.#at);
 				if (end === -1) throw new XmlError("a comment is never closed");
+				this.#node();
 				element.children.push({
 					type: "comment",
 					value: this.source.slice(this.#at + 4, end),
@@ -299,6 +365,7 @@ class Parser {
 			if (this.#peek("<![CDATA[")) {
 				const end = this.source.indexOf("]]>", this.#at);
 				if (end === -1) throw new XmlError("a CDATA section is never closed");
+				this.#node();
 				element.children.push({
 					type: "text",
 					value: this.source.slice(this.#at + 9, end),
@@ -315,6 +382,7 @@ class Parser {
 					throw new XmlError("a processing instruction is never closed");
 				const body = this.source.slice(this.#at + 2, end);
 				const space = body.search(/\s/);
+				this.#node();
 				element.children.push({
 					type: "instruction",
 					target: space === -1 ? body : body.slice(0, space),
@@ -324,11 +392,12 @@ class Parser {
 				continue;
 			}
 			if (this.#peek("<")) {
-				element.children.push(this.#element(element));
+				element.children.push(this.#element(element, depth + 1));
 				continue;
 			}
 			const next = this.source.indexOf("<", this.#at);
 			const end = next === -1 ? this.source.length : next;
+			this.#node();
 			element.children.push({
 				type: "text",
 				value: resolveEntities(this.source.slice(this.#at, end)),
