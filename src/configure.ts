@@ -7,6 +7,8 @@
  * installed AND working.
  */
 
+import { stubsRoot } from "./stubs.js";
+
 interface Codemods {
 	addProvider(importPath: string): Promise<void>;
 	addEnvVars(vars: Record<string, string>): Promise<void>;
@@ -15,6 +17,12 @@ interface Codemods {
 		content: string,
 		options?: { force?: boolean },
 	): Promise<void>;
+	makeUsingStub(
+		stubsRoot: string,
+		stubPath: string,
+		state?: Record<string, string | number | boolean>,
+		options?: { force?: boolean },
+	): Promise<{ path: string; contents: string }>;
 }
 
 export async function configure(codemods: Codemods): Promise<void> {
@@ -27,21 +35,5 @@ export async function configure(codemods: Codemods): Promise<void> {
 	});
 
 	await codemods.addProvider("@c9up/transit/provider");
-	await codemods.writeFile(
-		"config/transit.ts",
-		`import { defineConfig, socials } from '@c9up/transit'
-import env from '#start/env'
-
-export default defineConfig({
-  // The key is yours: it is what \`transit.begin(name)\` asks for.
-  google: socials.google({
-    clientId: env.get('GOOGLE_CLIENT_ID', ''),
-    clientSecret: env.get('GOOGLE_CLIENT_SECRET', ''),
-    callbackUrl: 'http://localhost:3333/auth/google/callback',
-  }),
-
-  // An OpenID Connect provider needs only its issuer:
-  // work: oidc({ issuer: env.get('OIDC_ISSUER'), clientId, clientSecret, callbackUrl }),
-})`,
-	);
+	await codemods.makeUsingStub(stubsRoot, "config/transit.stub");
 }
