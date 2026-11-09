@@ -33,8 +33,9 @@ afterEach(async () => {
 async function directory(
 	entries = [ada],
 	over: Partial<Parameters<typeof ldap>[0]> = {},
+	serverOptions: Parameters<typeof startFakeLdap>[1] = {},
 ) {
-	server = await startFakeLdap(entries);
+	server = await startFakeLdap(entries, serverOptions);
 	return new LdapDirectory({
 		url: server.url,
 		baseDn: BASE,
@@ -92,6 +93,48 @@ describe("transit > ldap > signing in", () => {
 		await expect(
 			(await directory([ada, twin])).authenticate("ada", "correct horse"),
 		).rejects.toThrow(/matches 2 entries/);
+	});
+});
+
+describe("transit > ldap > continuation references", () => {
+	const references = [
+		`ldap://DomainDnsZones.acme.test/DC=DomainDnsZones,${BASE}`,
+		`ldap://ForestDnsZones.acme.test/DC=ForestDnsZones,${BASE}`,
+	];
+
+	it("signs in when the search also answers references, as Active Directory does", async () => {
+		const subject = await directory([ada], {}, { references });
+
+		const user = await subject.authenticate("ada", "correct horse");
+
+		// A reference is not an entry: counting it would have made this login
+		// "match 3 entries".
+		expect(user.id).toBe(`uid=ada,${BASE}`);
+		// And it is not chased: the only binds are the reader and the person.
+		expect(server?.binds.map((bind) => bind.dn)).toEqual([
+			`cn=reader,${BASE}`,
+			`uid=ada,${BASE}`,
+		]);
+	});
+
+	it("treats a search that answers only references as no match", async () => {
+		const subject = await directory([], {}, { references });
+
+		await expect(subject.authenticate("ada", "correct horse")).rejects.toThrow(
+			/invalid credentials/,
+		);
+		// The referral URL never became a DN to bind as.
+		expect(server?.binds.map((bind) => bind.dn)).toEqual([`cn=reader,${BASE}`]);
+	});
+
+	it("rejects a bind answered with anything but a bind response", async () => {
+		// A search-done in place of the bind response, result code 0: read as a
+		// bind result it would have said "success".
+		const subject = await directory([ada], {}, { bindReplyTag: 0x65 });
+
+		await expect(subject.authenticate("ada", "correct horse")).rejects.toThrow(
+			/unexpected reply/,
+		);
 	});
 });
 

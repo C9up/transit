@@ -165,7 +165,9 @@ export class LdapDirectory implements DirectoryDriver {
 			name: name ?? nickName ?? entry.dn,
 			nickName,
 			// A directory that holds an address has vouched for it: that is what
-			// a directory is.
+			// a directory is. Unlike a SAML provider, the directory is the one
+			// the operator configured and runs — if it is a customer's, its
+			// addresses are that customer's say-so (see the README).
 			emailVerificationState: email === undefined ? "unsupported" : "verified",
 			raw: { dn: entry.dn, attributes: entry.attributes },
 		};

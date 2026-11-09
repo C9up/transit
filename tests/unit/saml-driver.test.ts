@@ -12,8 +12,12 @@ import { inflateRawSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalize } from "../../src/c14n.js";
 import { saml } from "../../src/config.js";
-import { SamlDriver } from "../../src/drivers/SamlDriver.js";
-import { MemoryAssertionReplayStore } from "../../src/replay.js";
+import { type SamlConfig, SamlDriver } from "../../src/drivers/SamlDriver.js";
+import {
+	MemoryAssertionReplayStore,
+	RedisAssertionReplayStore,
+	type ReplayRedisClient,
+} from "../../src/replay.js";
 import { parseXml, textOf, walk, type XmlNode } from "../../src/xml.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../fixtures");
@@ -48,8 +52,11 @@ function response(
 		audience?: string;
 		attributes?: string;
 		nameId?: string;
+		/** Seconds from now until both expiries the assertion carries. */
+		expiresIn?: number;
 	} = {},
 ): string {
+	const expiresIn = over.expiresIn ?? 300;
 	const assertionId = over.id ?? `_a-${requestId}`;
 	const assertion =
 		`<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${assertionId}">` +
@@ -58,10 +65,10 @@ function response(
 		"<saml:Subject>" +
 		`<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">${over.nameId ?? "ada@acme.test"}</saml:NameID>` +
 		'<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">' +
-		`<saml:SubjectConfirmationData Recipient="${over.recipient ?? ACS}" InResponseTo="${requestId}" NotOnOrAfter="${iso(300)}"/>` +
+		`<saml:SubjectConfirmationData Recipient="${over.recipient ?? ACS}" InResponseTo="${requestId}" NotOnOrAfter="${iso(expiresIn)}"/>` +
 		"</saml:SubjectConfirmation>" +
 		"</saml:Subject>" +
-		`<saml:Conditions NotBefore="${iso(-300)}" NotOnOrAfter="${iso(300)}">` +
+		`<saml:Conditions NotBefore="${iso(-300)}" NotOnOrAfter="${iso(expiresIn)}">` +
 		`<saml:AudienceRestriction><saml:Audience>${over.audience ?? SP}</saml:Audience></saml:AudienceRestriction>` +
 		"</saml:Conditions>" +
 		'<saml:AuthnStatement SessionIndex="session-9"/>' +
@@ -202,9 +209,9 @@ describe("transit > saml > callback", () => {
 
 		expect(user.id).toBe("ada@acme.test");
 		expect(user.name).toBe("Ada Lovelace");
-		// A directory that asserts an address has vouched for it.
 		expect(user.email).toBe("ada@acme.test");
-		expect(user.emailVerificationState).toBe("verified");
+		// Nothing says this provider is authoritative for the address.
+		expect(user.emailVerificationState).toBe("unsupported");
 		expect(user.raw.sessionIndex).toBe("session-9");
 		expect(token.accessToken).toBe("session-9");
 	});
@@ -221,6 +228,52 @@ describe("transit > saml > callback", () => {
 
 		// Everything else passes on a captured response posted twice. This is
 		// what does not.
+		await expect(
+			driver.callback(posted, started.state, started.state, started.secret),
+		).rejects.toThrow(/already been used/);
+	});
+
+	it("refuses a second post inside the clock skew, after the stated expiry", async () => {
+		const driver = new SamlDriver({
+			...config,
+			replayStore: new MemoryAssertionReplayStore(),
+		});
+		const { started, requestId } = await begin(driver);
+		// Expired thirty seconds ago: still accepted under the default minute of
+		// skew, so the record of it has to be too.
+		const posted = response(requestId, { expiresIn: -30 });
+
+		await driver.callback(posted, started.state, started.state, started.secret);
+
+		await expect(
+			driver.callback(posted, started.state, started.state, started.secret),
+		).rejects.toThrow(/already been used/);
+	});
+
+	it("keeps the shared record for the whole window a custom skew accepts", async () => {
+		const keys = new Map<string, number>();
+		const ttls: number[] = [];
+		const redis: ReplayRedisClient = {
+			async set(key, _value, ...args) {
+				if (keys.has(key)) return null;
+				const ttl = Number(args[args.indexOf("EX") + 1]);
+				ttls.push(ttl);
+				keys.set(key, ttl);
+				return "OK";
+			},
+		};
+		const driver = new SamlDriver({
+			...config,
+			clockSkewSeconds: 300,
+			replayStore: new RedisAssertionReplayStore(redis),
+		});
+		const { started, requestId } = await begin(driver);
+		// Expired 200 s ago, and still accepted for another 100 s with this skew.
+		const posted = response(requestId, { expiresIn: -200 });
+
+		await driver.callback(posted, started.state, started.state, started.secret);
+
+		expect(ttls[0]).toBeGreaterThanOrEqual(100);
 		await expect(
 			driver.callback(posted, started.state, started.state, started.secret),
 		).rejects.toThrow(/already been used/);
@@ -329,6 +382,75 @@ describe("transit > saml > callback", () => {
 				started.secret,
 			),
 		).rejects.toThrow(/not base64-encoded XML/);
+	});
+});
+
+describe("transit > saml > whose addresses are verified", () => {
+	async function signIn(over: Partial<SamlConfig>, email: string) {
+		const driver = new SamlDriver({ ...config, ...over });
+		const { started, requestId } = await begin(driver);
+		const { user } = await driver.callback(
+			response(requestId, {
+				nameId: `user-${email}`,
+				attributes:
+					'<saml:AttributeStatement xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">' +
+					`<saml:Attribute Name="email"><saml:AttributeValue>${email}</saml:AttributeValue></saml:Attribute>` +
+					"</saml:AttributeStatement>",
+			}),
+			started.state,
+			started.state,
+			started.secret,
+		);
+		return user;
+	}
+
+	it("verifies nothing by default, whatever the provider asserts", async () => {
+		// The administrator of a customer's provider can assert any address —
+		// another tenant's included.
+		const user = await signIn({}, "ceo@other-tenant.test");
+
+		expect(user.email).toBe("ceo@other-tenant.test");
+		expect(user.emailVerificationState).toBe("unsupported");
+	});
+
+	it("verifies every address of a provider configured as authoritative", async () => {
+		const user = await signIn({ trustEmail: true }, "ada@acme.test");
+
+		expect(user.emailVerificationState).toBe("verified");
+	});
+
+	it("verifies only the addresses in the trusted domains", async () => {
+		const trusted = { trustedEmailDomains: ["acme.test"] };
+
+		expect(
+			(await signIn(trusted, "ada@ACME.test")).emailVerificationState,
+		).toBe("verified");
+		expect(
+			(await signIn(trusted, "ceo@other-tenant.test")).emailVerificationState,
+		).toBe("unverified");
+		// The domain is what follows the LAST @, and a subdomain is not the
+		// domain.
+		expect(
+			(await signIn(trusted, "x@acme.test@evil.test")).emailVerificationState,
+		).toBe("unverified");
+		expect(
+			(await signIn(trusted, "x@eu.acme.test")).emailVerificationState,
+		).toBe("unverified");
+	});
+
+	it("refuses a domain list that holds an address, or both options at once", () => {
+		expect(
+			() =>
+				new SamlDriver({ ...config, trustedEmailDomains: ["ada@acme.test"] }),
+		).toThrow(/not a domain/);
+		expect(
+			() =>
+				new SamlDriver({
+					...config,
+					trustEmail: true,
+					trustedEmailDomains: ["acme.test"],
+				}),
+		).toThrow(/both trustEmail and trustedEmailDomains/);
 	});
 });
 

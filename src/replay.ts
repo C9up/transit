@@ -15,7 +15,9 @@ import { quasarConnection } from "./quasar.js";
 
 export interface AssertionReplayStore {
 	/**
-	 * Remember `assertionId` until `expiresAt` (epoch seconds).
+	 * Remember `assertionId` until `expiresAt` (epoch seconds) — the
+	 * `rememberUntil` of a validated assertion, which already counts the clock
+	 * skew it was accepted with.
 	 *
 	 * Answers `true` when this is the first time, `false` when the assertion
 	 * has already been used. Implementations must decide that atomically:
@@ -82,8 +84,9 @@ export class RedisAssertionReplayStore implements AssertionReplayStore {
 
 	async remember(assertionId: string, expiresAt: number): Promise<boolean> {
 		const client = await this.#client();
-		// The key outlives the assertion by a minute, so an assertion accepted
-		// at the edge of its window cannot be replayed just after it.
+		// `expiresAt` already covers the clock skew the validation allowed. The
+		// extra minute absorbs clock differences between the replica that
+		// stores the key and the one a replay lands on.
 		const ttl = Math.max(
 			1,
 			Math.ceil(expiresAt - Math.floor(Date.now() / 1000)) + 60,

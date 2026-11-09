@@ -44,6 +44,7 @@ const UNBIND_REQUEST = applicationPrimitive(2);
 const SEARCH_REQUEST = application(3);
 const SEARCH_ENTRY = application(4);
 const SEARCH_DONE = application(5);
+const SEARCH_REFERENCE = application(19);
 
 export class LdapError extends Error {
 	readonly code: number | undefined;
@@ -290,12 +291,40 @@ export class LdapConnection {
 		if (!waiting || !expected) return;
 
 		if (expected.until === undefined) {
-			// A single-reply operation: this is the answer.
-			this.#finish(id, [op.value]);
+			// A single-reply operation: the answer is the one tag it expects, and
+			// any other reply under its id is the server saying something this
+			// operation cannot read as a result.
+			if (expected.collect.includes(op.tag)) {
+				this.#finish(id, [op.value]);
+			} else {
+				this.#fail(id, unexpectedReply(op.tag));
+			}
 			return;
 		}
-		waiting.parts.push(op.value);
-		if (op.tag === expected.until) this.#finish(id, waiting.parts);
+		if (op.tag === expected.until) {
+			waiting.parts.push(op.value);
+			this.#finish(id, waiting.parts);
+			return;
+		}
+		if (expected.collect.includes(op.tag)) {
+			waiting.parts.push(op.value);
+			return;
+		}
+		if (op.tag === SEARCH_REFERENCE) {
+			// A continuation reference names another server that may hold more
+			// of the subtree (RFC 4511 §4.5.3). It is not an entry, and chasing
+			// it would send the next bind to wherever the reply pointed. Active
+			// Directory answers several for any search from a domain root.
+			return;
+		}
+		this.#fail(id, unexpectedReply(op.tag));
+	}
+
+	#fail(id: number, error: Error): void {
+		const waiting = this.#pending.get(id);
+		this.#pending.delete(id);
+		this.#expect.delete(id);
+		waiting?.reject(error);
 	}
 
 	#finish(id: number, parts: Buffer[]): void {
@@ -351,6 +380,12 @@ function readEntry(value: Buffer): LdapEntry {
 		dn: dnElement ? decodeString(dnElement.value) : "",
 		attributes,
 	};
+}
+
+function unexpectedReply(tag: number): LdapError {
+	return new LdapError(
+		`the directory answered with an unexpected reply (tag 0x${tag.toString(16)})`,
+	);
 }
 
 /** LDAP answers a code; anything but zero is a refusal worth reporting. */

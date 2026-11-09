@@ -100,6 +100,15 @@ password is an anonymous bind, and the directory answers success. And there is
 no filter string — a filter is a structure whose values are written as octets,
 so a username cannot become syntax.
 
+The search ignores continuation references (Active Directory answers some for
+any search from a domain root) instead of counting them as entries, and never
+follows them.
+
+An address read from the directory is reported `verified`: the directory is
+the one you configured and run. If it belongs to someone else — a customer's
+directory — its addresses are that customer's say-so, and linking accounts by
+email across tenants on that basis is not safe.
+
 ## SAML 2.0
 
 ```ts
@@ -118,7 +127,8 @@ export default defineConfig({
 The certificates come from the provider's metadata and nowhere else. The
 element the signature covers is the element that is read — nothing is looked up
 in the document afterwards, which is what closes XML Signature Wrapping. An
-assertion is a bearer token, so its id is remembered until it expires.
+assertion is a bearer token, so its id is remembered for as long as it could
+still be accepted — its later expiry plus `clockSkewSeconds`.
 
 That record has to be **shared by every replica**, because it is what stops the
 same assertion being presented twice. The in-process default bounds replay
@@ -132,6 +142,15 @@ replayStore: replayStores.memory()                       // a single process, de
 
 Outside production the in-process store remains the default: one dev process is
 the case it is correct for.
+
+Whoever administers a SAML provider can assert any address, so an asserted
+address is reported `unsupported` unless the config says the provider is
+authoritative for it:
+
+```ts
+trustEmail: true                        // your own provider: every address is verified
+trustedEmailDomains: ['acme.test']      // a customer's: only acme.test addresses are verified, others unverified
+```
 
 ## OpenID Connect
 
@@ -155,6 +174,10 @@ before anyone is signed in: signature against the published key, algorithm
 taken from what the provider **declared** rather than from the token's own
 header, and every claim that binds it to this exchange — `iss`, `aud`, `exp`,
 and the `nonce`. Only asymmetric signatures are accepted.
+
+The issuer is compared byte for byte with the discovery document's `issuer` and
+with every token's `iss`, so write it exactly as the provider does — Auth0's
+ends with a slash (`https://tenant.auth0.com/`).
 
 ## Before linking an account by email
 

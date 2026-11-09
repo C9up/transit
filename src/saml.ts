@@ -35,8 +35,16 @@ export interface SamlIdentity {
 	attributes: Record<string, string[]>;
 	/** The assertion's own id, for the replay check. */
 	assertionId: string;
-	/** When the assertion stops being usable, epoch seconds. */
+	/** The `NotOnOrAfter` of the assertion's conditions, epoch seconds. */
 	notOnOrAfter: number;
+	/**
+	 * Until when a replay record has to last, epoch seconds: the later of the
+	 * two expiries the assertion carries (its conditions and its bearer
+	 * confirmation) plus the clock skew this validation allowed. Before that
+	 * instant the same assertion can still pass `validateAssertion`, so a
+	 * record forgotten earlier lets a captured response sign in again.
+	 */
+	rememberUntil: number;
 	/** The provider's session, when it named one. */
 	sessionIndex: string | undefined;
 }
@@ -232,6 +240,7 @@ export function validateAssertion(
 		attributes: readAttributes(assertion),
 		assertionId,
 		notOnOrAfter,
+		rememberUntil: Math.max(notOnOrAfter, confirmationExpiry) + skew,
 		sessionIndex: authn?.attributes.find((a) => a.local === "SessionIndex")
 			?.value,
 	};

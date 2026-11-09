@@ -26,6 +26,7 @@ const UNBIND_REQUEST = applicationPrimitive(2);
 const SEARCH_REQUEST = application(3);
 const SEARCH_ENTRY = application(4);
 const SEARCH_DONE = application(5);
+const SEARCH_REFERENCE = application(19);
 
 export interface FakeEntry {
 	dn: string;
@@ -44,7 +45,16 @@ export interface FakeLdap {
 
 export async function startFakeLdap(
 	entries: FakeEntry[],
-	options: { loginAttribute?: string } = {},
+	options: {
+		loginAttribute?: string;
+		/**
+		 * Continuation references sent with every search, after the entries —
+		 * what Active Directory answers for a subtree search from a domain root.
+		 */
+		references?: string[];
+		/** The tag a bind is answered with, to play a server that misbehaves. */
+		bindReplyTag?: number;
+	} = {},
 ): Promise<FakeLdap> {
 	const loginAttribute = options.loginAttribute ?? "uid";
 	const searched: string[] = [];
@@ -79,7 +89,9 @@ export async function startFakeLdap(
 					const ok =
 						dn === "" ||
 						(known ? known.password === password : dn.startsWith("cn=reader"));
-					socket.write(reply(id, BIND_RESPONSE, ok ? 0 : 49));
+					socket.write(
+						reply(id, options.bindReplyTag ?? BIND_RESPONSE, ok ? 0 : 49),
+					);
 					continue;
 				}
 				if (op.tag === SEARCH_REQUEST) {
@@ -90,6 +102,9 @@ export async function startFakeLdap(
 					for (const entry of entries) {
 						if (!entry.attributes[loginAttribute]?.includes(wanted)) continue;
 						socket.write(entryMessage(id, entry));
+					}
+					for (const url of options.references ?? []) {
+						socket.write(referenceMessage(id, url));
 					}
 					socket.write(reply(id, SEARCH_DONE, 0));
 				}
@@ -156,5 +171,12 @@ function entryMessage(id: number, entry: FakeEntry): Buffer {
 			],
 			SEARCH_ENTRY,
 		),
+	]);
+}
+
+function referenceMessage(id: number, url: string): Buffer {
+	return encodeSequence([
+		encodeInteger(id),
+		encodeSequence([encodeString(url)], SEARCH_REFERENCE),
 	]);
 }

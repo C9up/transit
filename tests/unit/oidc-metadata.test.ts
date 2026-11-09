@@ -94,10 +94,43 @@ describe("transit > discovery", () => {
 		);
 	});
 
-	it("ignores a trailing slash on the issuer", () => {
-		expect(new OidcDiscovery(`${ISSUER}/`).issuer).toBe(ISSUER);
+	it("keeps the issuer verbatim and joins the well-known URL without a double slash", () => {
+		expect(new OidcDiscovery(`${ISSUER}/`).issuer).toBe(`${ISSUER}/`);
+		expect(new OidcDiscovery(`${ISSUER}/`).url).toBe(
+			`${ISSUER}/.well-known/openid-configuration`,
+		);
 		expect(new OidcDiscovery(`${ISSUER}//`).url).toBe(
 			`${ISSUER}/.well-known/openid-configuration`,
+		);
+	});
+
+	it("accepts an issuer that ends with a slash when the document declares it so", async () => {
+		// Auth0's issuer is `https://<tenant>.auth0.com/`, slash included, in
+		// its discovery document and in its id_tokens.
+		const calls = stubFetch({ body: { ...metadata, issuer: `${ISSUER}/` } });
+
+		const found = await new OidcDiscovery(`${ISSUER}/`).metadata();
+
+		expect(found.issuer).toBe(`${ISSUER}/`);
+		expect(calls).toEqual([`${ISSUER}/.well-known/openid-configuration`]);
+	});
+
+	it("accepts an issuer without a slash against a document without one", async () => {
+		stubFetch({ body: metadata });
+
+		expect((await new OidcDiscovery(ISSUER).metadata()).issuer).toBe(ISSUER);
+	});
+
+	it("refuses an issuer whose trailing slash differs from the document's", async () => {
+		// Discovery §4.3: the issuer returned MUST be identical to the one used.
+		stubFetch({ body: { ...metadata, issuer: `${ISSUER}/` } });
+		await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
+			/discovery answered for issuer/,
+		);
+
+		stubFetch({ body: metadata });
+		await expect(new OidcDiscovery(`${ISSUER}/`).metadata()).rejects.toThrow(
+			/discovery answered for issuer/,
 		);
 	});
 

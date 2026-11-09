@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
 	assertionInside,
 	assertResponseSucceeded,
+	type SamlExpectations,
 	validateAssertion,
 } from "../../src/saml.js";
 import { parseXml, walk } from "../../src/xml.js";
@@ -64,7 +65,7 @@ function assertionXml(
 	);
 }
 
-const validate = (xml: string, over: Partial<typeof expected> = {}) =>
+const validate = (xml: string, over: Partial<SamlExpectations> = {}) =>
 	validateAssertion(parseXml(xml), { ...expected, ...over });
 
 describe("transit > saml > a good assertion", () => {
@@ -168,6 +169,34 @@ describe("transit > saml > when it is usable", () => {
 		expect(validate(assertionXml({ notOnOrAfter: iso(-30) })).nameId).toBe(
 			"ada@acme.test",
 		);
+	});
+
+	it("asks the replay record to outlive every instant the assertion is accepted at", () => {
+		const xml = assertionXml({
+			notOnOrAfter: iso(120),
+			confirmationExpiry: iso(200),
+		});
+
+		// The later expiry, plus the skew the validation allowed.
+		expect(validate(xml).rememberUntil).toBe(NOW + 200 + 60);
+		expect(validate(xml, { clockSkewSeconds: 300 }).rememberUntil).toBe(
+			NOW + 200 + 300,
+		);
+	});
+
+	it("still accepts the assertion one second before its rememberUntil, and not at it", () => {
+		const xml = assertionXml({
+			notOnOrAfter: iso(0),
+			confirmationExpiry: iso(0),
+		});
+		const { rememberUntil } = validate(xml, { clockSkewSeconds: 90 });
+
+		expect(
+			validate(xml, { clockSkewSeconds: 90, now: rememberUntil - 1 }).nameId,
+		).toBe("ada@acme.test");
+		expect(() =>
+			validate(xml, { clockSkewSeconds: 90, now: rememberUntil }),
+		).toThrow(/no longer usable|has expired/);
 	});
 
 	it("refuses an assertion with no expiry at all", () => {

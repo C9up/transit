@@ -51,9 +51,10 @@ export class OidcDiscovery {
 	#inFlight: Promise<OidcMetadata> | undefined;
 
 	constructor(issuer: string, options: RemoteOptions = {}) {
-		// A trailing slash changes the well-known URL and, on some providers,
-		// the issuer claim it must be compared against.
-		this.#issuer = issuer.replace(/\/+$/, "");
+		// Kept byte for byte: the discovery document's `issuer` and every
+		// id_token's `iss` must be IDENTICAL to it (OpenID Connect Discovery
+		// §4.3), and some providers' issuers end with a slash (Auth0's do).
+		this.#issuer = issuer;
 		this.#ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
 		this.#now = options.now ?? Date.now;
 	}
@@ -63,7 +64,9 @@ export class OidcDiscovery {
 	}
 
 	get url(): string {
-		return `${this.#issuer}/.well-known/openid-configuration`;
+		// Only the well-known URL drops the trailing slash, so it is joined
+		// without a double one.
+		return `${this.#issuer.replace(/\/+$/, "")}/.well-known/openid-configuration`;
 	}
 
 	async metadata(): Promise<OidcMetadata> {

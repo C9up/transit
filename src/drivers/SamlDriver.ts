@@ -26,6 +26,7 @@ import {
 	validateAssertion,
 } from "../saml.js";
 import type {
+	EmailVerificationState,
 	OAuthToken,
 	RedirectRequest,
 	TransitDriver,
@@ -92,6 +93,23 @@ export interface SamlConfig {
 	replayStore?: AssertionReplayStore | (() => AssertionReplayStore);
 	/** The attribute names this provider uses, when they are not the usual ones. */
 	claims?: { email?: string; name?: string; nickName?: string };
+	/**
+	 * Mark every address this provider asserts as `"verified"`.
+	 *
+	 * Only for a provider that is authoritative for ALL the addresses it can
+	 * assert — your own organisation's. Whoever administers the provider can
+	 * assert any address, so with a customer's provider this hands them every
+	 * account an application links by email. Default false: an asserted
+	 * address is `"unsupported"`.
+	 */
+	trustEmail?: boolean;
+	/**
+	 * The domains this provider is authoritative for. An asserted address in
+	 * one of them is `"verified"`, any other is `"unverified"`. Compared without
+	 * case on what follows the address's last `@`, exactly — a subdomain is
+	 * listed on its own.
+	 */
+	trustedEmailDomains?: string[];
 }
 
 /**
@@ -116,6 +134,7 @@ function refuseImplicitMemoryReplayStoreInProduction(): void {
 
 export class SamlDriver implements TransitDriver {
 	readonly #config: SamlConfig;
+	readonly #trustedDomains: ReadonlySet<string> | undefined;
 	#replay: AssertionReplayStore | undefined;
 
 	constructor(config: SamlConfig) {
@@ -133,6 +152,7 @@ export class SamlDriver implements TransitDriver {
 			// healthy, and reported it to whoever happened to sign in first.
 			refuseImplicitMemoryReplayStoreInProduction();
 		}
+		this.#trustedDomains = trustedDomains(config);
 		this.#config = config;
 	}
 
@@ -223,9 +243,12 @@ export class SamlDriver implements TransitDriver {
 			clockSkewSeconds: this.#config.clockSkewSeconds,
 		});
 
+		// Remembered for as long as the validation above would still accept the
+		// assertion — its later expiry plus the clock skew — not merely until
+		// the expiry it states.
 		const fresh = await this.#replayStore().remember(
 			identity.assertionId,
-			identity.notOnOrAfter,
+			identity.rememberUntil,
 		);
 		if (!fresh) {
 			// Everything above passes on a captured response posted a second
@@ -271,6 +294,20 @@ export class SamlDriver implements TransitDriver {
 		);
 	}
 
+	/**
+	 * Whoever administers a SAML provider can assert any address, so one is
+	 * verified only when the config says this provider is authoritative for it.
+	 */
+	#emailVerificationState(email: string | undefined): EmailVerificationState {
+		if (email === undefined) return "unsupported";
+		if (this.#config.trustEmail === true) return "verified";
+		const domains = this.#trustedDomains;
+		if (domains === undefined) return "unsupported";
+		const at = email.lastIndexOf("@");
+		const domain = at === -1 ? "" : email.slice(at + 1).toLowerCase();
+		return domains.has(domain) ? "verified" : "unverified";
+	}
+
 	#mapUser(identity: SamlIdentity): TransitUser {
 		const claims = this.#config.claims ?? {};
 		const email =
@@ -285,9 +322,7 @@ export class SamlDriver implements TransitDriver {
 			email: email ?? "",
 			name: name ?? identity.nameId,
 			nickName: pick(identity, claims.nickName, NICK_CLAIMS),
-			// A provider that asserts an address has vouched for it: that is what
-			// its directory is.
-			emailVerificationState: email === undefined ? "unsupported" : "verified",
+			emailVerificationState: this.#emailVerificationState(email),
 			raw: {
 				nameId: identity.nameId,
 				nameIdFormat: identity.nameIdFormat,
@@ -296,6 +331,32 @@ export class SamlDriver implements TransitDriver {
 			},
 		};
 	}
+}
+
+/**
+ * The trusted domains, lower-cased, or undefined when none were configured.
+ * A malformed list fails at construction rather than marking nothing, or the
+ * wrong addresses, verified.
+ */
+function trustedDomains(config: SamlConfig): ReadonlySet<string> | undefined {
+	const domains = config.trustedEmailDomains;
+	if (domains === undefined) return undefined;
+	if (config.trustEmail === true) {
+		throw new SamlError(
+			`'${config.issuer}' sets both trustEmail and trustedEmailDomains — trustEmail already trusts every domain, so say which one is meant`,
+		);
+	}
+	const normalized = new Set<string>();
+	for (const domain of domains) {
+		const value = domain.trim().toLowerCase();
+		if (value === "" || value.includes("@")) {
+			throw new SamlError(
+				`trustedEmailDomains of '${config.issuer}' lists '${domain}', which is not a domain — write 'acme.com', not an address`,
+			);
+		}
+		normalized.add(value);
+	}
+	return normalized;
 }
 
 /** The first value among the configured name, then the usual ones. */

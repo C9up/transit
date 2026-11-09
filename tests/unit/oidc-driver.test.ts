@@ -242,6 +242,28 @@ describe("transit > oidc > callback", () => {
 		});
 	});
 
+	it("signs in against an issuer that ends with a slash, as Auth0's does", async () => {
+		const slashed = `${ISSUER}/`;
+		const { result } = await run({
+			config: { issuer: slashed },
+			metadata: { ...metadata, issuer: slashed },
+			claims: { iss: slashed },
+		});
+
+		expect((await result).user.id).toBe("user-1");
+	});
+
+	it("refuses an id_token whose issuer drops the slash the provider declared", async () => {
+		const slashed = `${ISSUER}/`;
+		const { result } = await run({
+			config: { issuer: slashed },
+			metadata: { ...metadata, issuer: slashed },
+			claims: { iss: ISSUER },
+		});
+
+		await expect(result).rejects.toThrow(/issuer mismatch/);
+	});
+
 	it("sends the PKCE verifier and the client credentials on the exchange", async () => {
 		const { calls, result } = await run();
 		await result;
