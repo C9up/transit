@@ -11,17 +11,24 @@
 
 import { quasarConnection as loadQuasarConnection } from "./vendor/quasarConnection.js";
 
-/** The named connection, checked for the commands the caller will issue. */
+/**
+ * The named connection, checked for the commands the caller will issue.
+ *
+ * `isConnection` is the caller's check over those same commands: only the
+ * caller knows which client type it needs, so only it can vouch for it.
+ */
 export async function quasarConnection<T>(
 	name: string | undefined,
 	required: readonly string[],
 	what: string,
+	isConnection: (value: unknown) => value is T,
 ): Promise<T> {
-	return loadQuasarConnection<T>({
+	return loadQuasarConnection({
 		pkg: "transit",
 		name,
 		required,
 		what,
+		isConnection,
 		raise: (_reason, message, cause) => new Error(message, { cause }),
 	});
 }

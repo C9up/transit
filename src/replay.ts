@@ -12,6 +12,7 @@
  */
 
 import { quasarConnection } from "./quasar.js";
+import { hasCommands } from "./vendor/quasarConnection.js";
 
 export interface AssertionReplayStore {
 	/**
@@ -54,6 +55,10 @@ export class MemoryAssertionReplayStore implements AssertionReplayStore {
 export interface ReplayRedisClient {
 	/** `SET key value EX <ttl> NX` — answers null when the key already exists. */
 	set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
+}
+
+function isReplayRedisClient(value: unknown): value is ReplayRedisClient {
+	return hasCommands(value, ["set"]);
 }
 
 export type ReplayRedisResolver =
@@ -124,15 +129,17 @@ export const replayStores = {
 		connection: ReplayRedisResolver | string;
 		prefix?: string;
 	}): () => AssertionReplayStore {
+		const { connection } = options;
 		const client: ReplayRedisResolver =
-			typeof options.connection === "string"
+			typeof connection === "string"
 				? () =>
-						quasarConnection<ReplayRedisClient>(
-							options.connection as string,
+						quasarConnection(
+							connection,
 							["set"],
 							"the assertion replay store",
+							isReplayRedisClient,
 						)
-				: options.connection;
+				: connection;
 		return () =>
 			new RedisAssertionReplayStore(client, { prefix: options.prefix });
 	},

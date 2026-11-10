@@ -7,6 +7,7 @@
  * first sign-in.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { hasCommands } from "../../src/vendor/quasarConnection.js";
 
 const SPECIFIER = "@c9up/quasar/services/main";
 
@@ -26,6 +27,11 @@ async function withQuasar(module: { default?: unknown; connection?: unknown }) {
 	return (await import("../../src/quasar.js")).quasarConnection;
 }
 
+/** Any object: the bridge has already checked the commands it was given. */
+function isObject(value: unknown): value is object {
+	return typeof value === "object" && value !== null;
+}
+
 afterEach(() => {
 	vi.doUnmock(SPECIFIER);
 	vi.resetModules();
@@ -38,7 +44,12 @@ describe("transit > the quasar bridge", () => {
 		});
 
 		await expect(
-			quasarConnection("main", ["set", "eval", "publish"], "the replay store"),
+			quasarConnection(
+				"main",
+				["set", "eval", "publish"],
+				"the replay store",
+				isObject,
+			),
 		).rejects.toThrow(/missing eval, publish/);
 	});
 
@@ -48,7 +59,7 @@ describe("transit > the quasar bridge", () => {
 		});
 
 		await expect(
-			quasarConnection("cache", ["set"], "the replay store"),
+			quasarConnection("cache", ["set"], "the replay store", isObject),
 		).rejects.toThrow(/connection 'cache' is missing set/);
 	});
 
@@ -63,10 +74,12 @@ describe("transit > the quasar bridge", () => {
 			},
 		});
 
-		const resolved = await quasarConnection<{ name?: string }>(
+		const resolved = await quasarConnection(
 			"main",
 			["set", "eval"],
 			"the test",
+			(value): value is { name?: unknown } =>
+				hasCommands(value, ["set", "eval"]),
 		);
 
 		// The named connection, not the default one.
@@ -79,7 +92,7 @@ describe("transit > the quasar bridge", () => {
 		});
 
 		await expect(
-			quasarConnection(undefined, ["set"], "the test"),
+			quasarConnection(undefined, ["set"], "the test", isObject),
 		).resolves.toBeDefined();
 	});
 
@@ -89,16 +102,16 @@ describe("transit > the quasar bridge", () => {
 		});
 
 		await expect(
-			quasarConnection("main", ["set"], "the test"),
+			quasarConnection("main", ["set"], "the test", isObject),
 		).resolves.toBeDefined();
 	});
 
 	it("refuses a module that is not a connection manager", async () => {
 		const quasarConnection = await withQuasar({ default: { nope: true } });
 
-		await expect(quasarConnection("main", ["set"], "the test")).rejects.toThrow(
-			/did not expose a connection\(\)/,
-		);
+		await expect(
+			quasarConnection("main", ["set"], "the test", isObject),
+		).rejects.toThrow(/did not expose a connection\(\)/);
 	});
 
 	it("says the package is missing when the import fails", async () => {
@@ -109,8 +122,8 @@ describe("transit > the quasar bridge", () => {
 		const { quasarConnection } = await import("../../src/quasar.js");
 
 		// The useful message names the package to install, not the module id.
-		await expect(quasarConnection("main", ["set"], "the test")).rejects.toThrow(
-			/pnpm add @c9up\/quasar/,
-		);
+		await expect(
+			quasarConnection("main", ["set"], "the test", isObject),
+		).rejects.toThrow(/pnpm add @c9up\/quasar/);
 	});
 });
