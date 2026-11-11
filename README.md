@@ -65,6 +65,19 @@ const { user, token } = await transit.callback(
 )
 ```
 
+Some providers come back with a POST rather than a redirect: Sign in with Apple
+(`form_post`) and SAML post a form, so `input()` reads from the request body.
+Only ream's body parser fills that body, so the callback route must run behind
+it — in the router middleware of `start/kernel.ts`:
+
+```ts
+router.use([() => import('@c9up/ream/bodyparser_middleware')])
+```
+
+It parses `application/x-www-form-urlencoded`, the form these providers post,
+by default. Without it `input('code')` and `input('state')` are `undefined`,
+and the callback fails on the state check rather than saying why.
+
 `begin()` works for every provider. `secret` is `undefined` for a plain OAuth2
 provider, the PKCE verifier for one that mandates it, and the request-token
 secret for OAuth1 — storing and returning it unconditionally is what lets one
@@ -77,7 +90,8 @@ controller serve all three.
 
 Sign in with Apple takes a key rather than a secret, its callback arrives as a
 POST, and it sends the user's name exactly once — read it with
-`parseAppleUser(ctx.request.input('user'))` and store it.
+`parseAppleUser(ctx.request.input('user'))` and store it. Being a POST, that
+callback needs the body parser in front of it (see the round trip above).
 
 ## LDAP and Active Directory
 
@@ -123,6 +137,11 @@ export default defineConfig({
   }),
 })
 ```
+
+The provider posts its answer to `callbackUrl` as a form: pass
+`ctx.request.input('SAMLResponse')` as the code and
+`ctx.request.input('RelayState')` as the state to `transit.callback()`, from a
+route behind the body parser (see the round trip above).
 
 The certificates come from the provider's metadata and nowhere else. The
 element the signature covers is the element that is read — nothing is looked up
