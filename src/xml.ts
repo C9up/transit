@@ -68,6 +68,7 @@ export interface XmlInstruction {
 export type XmlNode = XmlElement | XmlText | XmlComment | XmlInstruction;
 
 class XmlError extends Error {
+	readonly code = "E_TRANSIT_INVALID_XML";
 	constructor(message: string) {
 		super(`[transit] ${message}`);
 		this.name = "XmlError";
@@ -472,36 +473,54 @@ function split(qname: string): [prefix: string, local: string] {
 		: [qname.slice(0, colon), qname.slice(colon + 1)];
 }
 
+const PREDEFINED_ENTITIES: Readonly<Record<string, string>> = {
+	amp: "&",
+	lt: "<",
+	gt: ">",
+	quot: '"',
+	apos: "'",
+};
+
 /**
  * Resolve the five entities XML defines, and numeric references. Anything else
  * is refused rather than passed through: an unknown entity in a signed document
- * means the sender expected a declaration this parser will not read.
+ * means the sender expected a declaration this parser will not read, and a
+ * bare `&` or a malformed reference is not XML.
  */
 function resolveEntities(text: string): string {
-	return text.replace(
-		/&(#x?[0-9A-Fa-f]+|[A-Za-z]+);/g,
-		(whole, body: string) => {
-			switch (body) {
-				case "amp":
-					return "&";
-				case "lt":
-					return "<";
-				case "gt":
-					return ">";
-				case "quot":
-					return '"';
-				case "apos":
-					return "'";
-				default:
-					break;
-			}
-			if (body.startsWith("#x") || body.startsWith("#X")) {
-				return String.fromCodePoint(Number.parseInt(body.slice(2), 16));
-			}
-			if (body.startsWith("#")) {
-				return String.fromCodePoint(Number.parseInt(body.slice(1), 10));
+	return text.replace(/&([^&;]*)(;?)/g, (whole, body: string, end: string) => {
+		if (end !== ";") throw new XmlError(`unterminated reference '${whole}'`);
+		const named = Object.hasOwn(PREDEFINED_ENTITIES, body)
+			? PREDEFINED_ENTITIES[body]
+			: undefined;
+		if (named !== undefined) return named;
+		const hex = /^#[xX]([0-9A-Fa-f]{1,8})$/.exec(body)?.[1];
+		const decimal = /^#([0-9]{1,10})$/.exec(body)?.[1];
+		if (hex === undefined && decimal === undefined) {
+			if (/^#[xX]?[0-9A-Fa-f]+$/.test(body)) {
+				throw new XmlError(`'${whole}' is not a character XML allows`);
 			}
 			throw new XmlError(`unknown entity '${whole}'`);
-		},
+		}
+		const codePoint =
+			hex !== undefined
+				? Number.parseInt(hex, 16)
+				: Number.parseInt(decimal ?? "", 10);
+		if (!isXmlChar(codePoint)) {
+			throw new XmlError(`'${whole}' is not a character XML allows`);
+		}
+		return String.fromCodePoint(codePoint);
+	});
+}
+
+/** XML 1.0's `Char` production: no NUL, no surrogates, nothing past U+10FFFF. */
+function isXmlChar(codePoint: number): boolean {
+	return (
+		codePoint === 0x9 ||
+		codePoint === 0xa ||
+		codePoint === 0xd ||
+		(codePoint >= 0x20 && codePoint <= 0xd7ff) ||
+		(codePoint >= 0xe000 && codePoint <= 0xfffd) ||
+		(codePoint >= 0x10000 && codePoint <= 0x10ffff)
 	);
 }

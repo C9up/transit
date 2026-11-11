@@ -67,3 +67,56 @@ describe("transit > ldap message length", () => {
 		expect(MAX_MESSAGE_BYTES).toBeLessThan(0xffffffff);
 	});
 });
+
+describe("transit > xml > character and entity references", () => {
+	it("resolves the predefined entities and valid numeric references", () => {
+		const root = parseXml(
+			'<a t="&quot;&#x41;&#66;">&amp;&lt;&gt;&apos;&#x1F600;&#9;</a>',
+		);
+		expect(root.attributes[0]?.value).toBe('"AB');
+		const text = root.children[0];
+		expect(text?.type === "text" ? text.value : undefined).toBe(
+			"&<>'\u{1F600}\t",
+		);
+	});
+
+	it("refuses a numeric reference outside what XML calls a character", () => {
+		for (const reference of [
+			"&#x110000;",
+			"&#99999999999;",
+			"&#99999999999999999999999;",
+			"&#0;",
+			"&#xD800;",
+			"&#xDFFF;",
+			"&#x1;",
+			"&#xFFFE;",
+		]) {
+			const parse = () => parseXml(`<a>${reference}</a>`);
+			// An XmlError, never a bare RangeError a caller cannot tell apart
+			// from a crash.
+			expect(parse, reference).toThrow(/not a character XML allows/);
+			expect(parse).toThrow(
+				expect.objectContaining({ code: "E_TRANSIT_INVALID_XML" }),
+			);
+		}
+	});
+
+	it("refuses a malformed or unknown reference instead of passing it through", () => {
+		for (const reference of [
+			"&#;",
+			"&#x;",
+			"&#xZZ;",
+			"&foo-bar;",
+			"&nbsp;",
+			"&amp",
+			"a & b",
+		]) {
+			expect(() => parseXml(`<a>${reference}</a>`), reference).toThrow(
+				expect.objectContaining({ code: "E_TRANSIT_INVALID_XML" }),
+			);
+			expect(() => parseXml(`<a b="${reference}"/>`), reference).toThrow(
+				expect.objectContaining({ code: "E_TRANSIT_INVALID_XML" }),
+			);
+		}
+	});
+});
