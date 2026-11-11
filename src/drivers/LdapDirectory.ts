@@ -43,7 +43,10 @@ export interface LdapConfig {
 	allowInsecure?: boolean;
 	/** Refuse a server certificate that does not check out. Default true. */
 	rejectUnauthorized?: boolean;
-	/** How long to wait for the directory, in milliseconds. Default 10 000. */
+	/**
+	 * How long to wait for the directory, in milliseconds: for the connection
+	 * and its TLS handshake, then for each reply. Default 10 000.
+	 */
 	timeoutMs?: number;
 }
 

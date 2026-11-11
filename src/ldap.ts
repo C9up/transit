@@ -76,7 +76,10 @@ export interface LdapOptions {
 	 * so this has to be asked for.
 	 */
 	allowInsecure?: boolean;
-	/** How long to wait for the server, in milliseconds. Default 10 000. */
+	/**
+	 * How long to wait for the server, in milliseconds: for the connection and
+	 * its TLS handshake, then for each reply. Default 10 000.
+	 */
 	timeoutMs?: number;
 	/** Refuse a server certificate that does not check out. Default true. */
 	rejectUnauthorized?: boolean;
@@ -120,20 +123,44 @@ export class LdapConnection {
 		// the bare address.
 		const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
 
+		const timeoutMs = this.#options.timeoutMs ?? 10_000;
 		await new Promise<void>((resolve, reject) => {
-			const socket = secure
-				? connectTls({
-						host,
-						port,
-						// TLS names no server by address, and Node refuses one. Without
-						// it the certificate is checked against `host` itself, which
-						// for an address means its IP SANs: verification stays on.
-						...(isIP(host) === 0 ? { servername: host } : {}),
-						rejectUnauthorized: this.#options.rejectUnauthorized !== false,
-					})
-				: connectTcp({ host, port });
+			let socket: Socket;
+			try {
+				socket = secure
+					? connectTls({
+							host,
+							port,
+							// TLS names no server by address, and Node refuses one. Without
+							// it the certificate is checked against `host` itself, which
+							// for an address means its IP SANs: verification stays on.
+							...(isIP(host) === 0 ? { servername: host } : {}),
+							rejectUnauthorized: this.#options.rejectUnauthorized !== false,
+						})
+					: connectTcp({ host, port });
+			} catch (error) {
+				reject(
+					new LdapError(
+						`could not reach ${host}:${port} — ${error instanceof Error ? error.message : String(error)}`,
+					),
+				);
+				return;
+			}
+
+			// The bound covers the connect and the TLS handshake too: a directory
+			// that accepts the connection and never finishes the handshake (or a
+			// black-holed address) would otherwise hold the sign-in forever.
+			const connectTimer = setTimeout(() => {
+				socket.destroy();
+				reject(
+					new LdapError(
+						`${host}:${port} did not answer within ${timeoutMs} ms`,
+					),
+				);
+			}, timeoutMs);
 
 			const onError = (error: Error) => {
+				clearTimeout(connectTimer);
 				this.#failAll(error);
 				reject(
 					new LdapError(`could not reach ${host}:${port} — ${error.message}`),
@@ -141,7 +168,8 @@ export class LdapConnection {
 			};
 			socket.once("error", onError);
 			socket.once(secure ? "secureConnect" : "connect", () => {
-				socket.setTimeout(this.#options.timeoutMs ?? 10_000);
+				clearTimeout(connectTimer);
+				socket.setTimeout(timeoutMs);
 				socket.on("data", (chunk) => this.#receive(chunk));
 				socket.on("timeout", () =>
 					this.#failAll(new LdapError("the directory stopped answering")),

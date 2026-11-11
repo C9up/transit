@@ -5,7 +5,8 @@
  * what this package encodes — so a mistake in the wire format shows up here
  * rather than against a live server.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { createServer, type Socket } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ldap } from "../../src/config.js";
 import { LdapDirectory } from "../../src/drivers/LdapDirectory.js";
 import { TransitManager } from "../../src/TransitManager.js";
@@ -208,6 +209,45 @@ describe("transit > ldap > the connection", () => {
 		await expect(subject.authenticate("ada", "x")).rejects.toThrow(
 			/could not reach/,
 		);
+	});
+});
+
+describe("transit > ldap > timeoutMs", () => {
+	it("bounds a TLS handshake the directory never completes", async () => {
+		// Accepts the connection, then says nothing: no handshake ever ends.
+		const accepted: Socket[] = [];
+		const silent = createServer((socket) => {
+			accepted.push(socket);
+			// Read, so the client's close is seen as an end.
+			socket.resume();
+			socket.on("error", () => {});
+		});
+		await new Promise<void>((resolve) =>
+			silent.listen(0, "127.0.0.1", resolve),
+		);
+		const address = silent.address();
+		const port =
+			typeof address === "object" && address !== null ? address.port : 0;
+		try {
+			const subject = new LdapDirectory({
+				url: `ldaps://127.0.0.1:${port}`,
+				baseDn: BASE,
+				loginAttribute: "uid",
+				timeoutMs: 200,
+			});
+			const started = Date.now();
+			await expect(subject.authenticate("ada", "x")).rejects.toThrow(
+				/did not answer within 200 ms/,
+			);
+			expect(Date.now() - started).toBeLessThan(2_000);
+			// The socket is not left open behind the refusal.
+			await vi.waitFor(() =>
+				expect(accepted.every((socket) => socket.destroyed)).toBe(true),
+			);
+		} finally {
+			for (const socket of accepted) socket.destroy();
+			await new Promise<void>((resolve) => silent.close(() => resolve()));
+		}
 	});
 });
 
