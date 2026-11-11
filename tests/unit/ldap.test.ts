@@ -88,6 +88,44 @@ describe("transit > ldap > signing in", () => {
 		).rejects.toThrow(/invalid credentials/);
 	});
 
+	it("does the same work for an unknown login as for a wrong password", async () => {
+		const wrong = await (await directory())
+			.authenticate("ada", "wrong")
+			.catch((error: unknown) => error);
+		const wrongWork = {
+			connections: server?.connections,
+			binds: server?.binds,
+		};
+		await server?.close();
+
+		const unknown = await (await directory())
+			.authenticate("nobody", "whatever")
+			.catch((error: unknown) => error);
+
+		// Same answer, and the same exchanges behind it: a second connection
+		// and a bind with the offered password, so the duration does not tell
+		// a known login from an unknown one.
+		expect(unknown).toBeInstanceOf(Error);
+		expect(wrong).toBeInstanceOf(Error);
+		expect(String(unknown)).toBe(String(wrong));
+		expect(server?.connections).toBe(wrongWork.connections);
+		expect(server?.connections).toBe(2);
+		expect(server?.binds).toHaveLength(wrongWork.binds?.length ?? -1);
+		const decoy = server?.binds[1];
+		expect(decoy?.password).toBe("whatever");
+		// Never a real entry: the decoy cannot lock or probe anyone's account.
+		expect(decoy?.dn).not.toBe(ada.dn);
+		expect(decoy?.dn.endsWith(`,${BASE}`)).toBe(true);
+	});
+
+	it("refuses an unknown login even when the directory accepts any bind", async () => {
+		const subject = await directory([ada], {}, { acceptEveryBind: true });
+
+		await expect(subject.authenticate("nobody", "whatever")).rejects.toThrow(
+			/invalid credentials/,
+		);
+	});
+
 	it("refuses a login that matches more than one entry", async () => {
 		const twin = { ...ada, dn: `uid=ada,ou=other,${BASE}` };
 
@@ -124,8 +162,13 @@ describe("transit > ldap > continuation references", () => {
 		await expect(subject.authenticate("ada", "correct horse")).rejects.toThrow(
 			/invalid credentials/,
 		);
-		// The referral URL never became a DN to bind as.
-		expect(server?.binds.map((bind) => bind.dn)).toEqual([`cn=reader,${BASE}`]);
+		// The referral URL never became a DN to bind as: the second bind is the
+		// decoy an unknown login gets.
+		expect(server?.binds).toHaveLength(2);
+		for (const bind of server?.binds ?? []) {
+			expect(bind.dn).not.toMatch(/^ldap:/i);
+			expect(references.some((url) => url.includes(bind.dn))).toBe(false);
+		}
 	});
 
 	it("rejects a bind answered with anything but a bind response", async () => {

@@ -12,6 +12,7 @@
  * of whatever last bound on it, so nothing else may run on that one.
  */
 
+import { randomUUID } from "node:crypto";
 import {
 	LdapConnection,
 	type LdapEntry,
@@ -19,6 +20,17 @@ import {
 	type LdapFilter,
 } from "../ldap.js";
 import type { DirectoryDriver, TransitUser } from "../types.js";
+
+/**
+ * The one refusal for a wrong password and an unknown login: which of the two
+ * it was is not something a sign-in form should disclose.
+ */
+function invalidCredentials(): LdapError {
+	return new LdapError(
+		"the directory refused the bind: invalid credentials",
+		49,
+	);
+}
 
 export interface LdapConfig {
 	/** `ldaps://directory.acme.test:636`. */
@@ -75,12 +87,33 @@ export class LdapDirectory implements DirectoryDriver {
 		}
 
 		const entry = await this.#find(username);
-		await this.#bindAs(entry.dn, password);
+		if (entry === undefined) {
+			// An unknown login does the work a known one does — a second
+			// connection and a bind with the offered password — against a DN
+			// that names nobody, so the duration does not tell the two apart.
+			// Whatever that bind answers, the sign-in is refused.
+			await this.#bindAs(this.#decoyDn(), password).catch(() => undefined);
+			throw invalidCredentials();
+		}
+		try {
+			await this.#bindAs(entry.dn, password);
+		} catch (error) {
+			// The refusal of a wrong password reads exactly like an unknown one.
+			if (error instanceof LdapError && error.code === 49) {
+				throw invalidCredentials();
+			}
+			throw error;
+		}
 		return this.#mapUser(entry);
 	}
 
-	/** Find the person, bound as whatever may search. */
-	async #find(username: string): Promise<LdapEntry> {
+	/** A DN under the base that no entry has: random, so none can be made to. */
+	#decoyDn(): string {
+		return `cn=transit-decoy-${randomUUID()},${this.#config.baseDn}`;
+	}
+
+	/** Find the person, bound as whatever may search. Undefined when unknown. */
+	async #find(username: string): Promise<LdapEntry | undefined> {
 		const connection = this.#open();
 		await connection.connect();
 		try {
@@ -113,20 +146,13 @@ export class LdapDirectory implements DirectoryDriver {
 				sizeLimit: 2,
 			});
 
-			if (entries.length === 0) {
-				// The same message as a wrong password: which of the two it was
-				// is not something a sign-in form should disclose.
-				throw new LdapError(
-					"the directory refused the bind: invalid credentials",
-					49,
-				);
-			}
-			if (entries.length > 1) {
+			const [entry, ...others] = entries;
+			if (others.length > 0) {
 				throw new LdapError(
 					`'${username}' matches ${entries.length} entries, and this signs in one person`,
 				);
 			}
-			return entries[0] as LdapEntry;
+			return entry;
 		} finally {
 			await connection.close();
 		}

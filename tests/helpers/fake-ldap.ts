@@ -41,6 +41,8 @@ export interface FakeLdap {
 	searched: string[];
 	/** Every DN that was bound, with the password offered. */
 	binds: Array<{ dn: string; password: string }>;
+	/** How many connections the client opened. */
+	readonly connections: number;
 }
 
 export async function startFakeLdap(
@@ -54,13 +56,17 @@ export async function startFakeLdap(
 		references?: string[];
 		/** The tag a bind is answered with, to play a server that misbehaves. */
 		bindReplyTag?: number;
+		/** Answer success to every bind, as a misconfigured directory would. */
+		acceptEveryBind?: boolean;
 	} = {},
 ): Promise<FakeLdap> {
 	const loginAttribute = options.loginAttribute ?? "uid";
 	const searched: string[] = [];
 	const binds: Array<{ dn: string; password: string }> = [];
 
+	let connections = 0;
 	const server: Server = createServer((socket) => {
+		connections += 1;
 		let buffer = Buffer.alloc(0);
 		socket.on("data", (chunk) => {
 			buffer = Buffer.concat([buffer, chunk]);
@@ -87,6 +93,7 @@ export async function startFakeLdap(
 					binds.push({ dn, password });
 					const known = entries.find((entry) => entry.dn === dn);
 					const ok =
+						options.acceptEveryBind === true ||
 						dn === "" ||
 						(known ? known.password === password : dn.startsWith("cn=reader"));
 					socket.write(
@@ -123,6 +130,9 @@ export async function startFakeLdap(
 		url: `ldap://127.0.0.1:${port}`,
 		searched,
 		binds,
+		get connections() {
+			return connections;
+		},
 		close: () =>
 			new Promise<void>((resolve) => {
 				server.close(() => resolve());
