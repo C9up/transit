@@ -121,8 +121,8 @@ export type TransitEntry = TransitDriver | DirectoryDriver;
 /** Whether an entry verifies credentials rather than redirecting. */
 export function isDirectory(entry: TransitEntry): entry is DirectoryDriver {
 	return (
-		typeof (entry as DirectoryDriver).authenticate === "function" &&
-		typeof (entry as TransitDriver).callback !== "function"
+		typeof Reflect.get(entry, "authenticate") === "function" &&
+		typeof Reflect.get(entry, "callback") !== "function"
 	);
 }
 

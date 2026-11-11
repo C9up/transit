@@ -22,6 +22,7 @@ import {
 	createVerify,
 	verify as verifySignature,
 } from "node:crypto";
+import { isRecord } from "./json.js";
 
 /** A public key as a provider publishes it. */
 export interface Jwk {
@@ -83,15 +84,16 @@ interface Parts {
  * genuine — it is what the caller needs to find the right key.
  */
 export function decodeJws(token: string): Parts {
-	const segments = token.split(".");
-	if (segments.length !== 3) {
+	const [encodedHeader, encodedPayload, encodedSignature, ...extra] =
+		token.split(".");
+	if (
+		encodedHeader === undefined ||
+		encodedPayload === undefined ||
+		encodedSignature === undefined ||
+		extra.length > 0
+	) {
 		throw new Error("[transit] id_token is not a compact JWS (three segments)");
 	}
-	const [encodedHeader, encodedPayload, encodedSignature] = segments as [
-		string,
-		string,
-		string,
-	];
 	return {
 		header: decodeSegment(encodedHeader, "header"),
 		payload: decodeSegment(encodedPayload, "payload"),
@@ -249,10 +251,10 @@ function decodeSegment(segment: string, what: string): Record<string, unknown> {
 	} catch {
 		throw new Error(`[transit] id_token ${what} is not valid JSON`);
 	}
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+	if (!isRecord(parsed)) {
 		throw new Error(`[transit] id_token ${what} is not an object`);
 	}
-	return parsed as Record<string, unknown>;
+	return parsed;
 }
 
 /**

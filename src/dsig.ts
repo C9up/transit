@@ -115,17 +115,17 @@ export function verifyXmlSignature(
 		(element) =>
 			element.namespaceUri === DSIG_NS && element.local === "Signature",
 	);
-	if (signatures.length === 0) {
+	const [signature, ...otherSignatures] = signatures;
+	if (signature === undefined) {
 		throw new SignatureError("the document carries no signature");
 	}
-	if (signatures.length > 1) {
+	if (otherSignatures.length > 0) {
 		// Which one covers what a reader will use is exactly the ambiguity
 		// wrapping attacks live in.
 		throw new SignatureError(
 			`the document carries ${signatures.length} signatures, and this verifies documents with one`,
 		);
 	}
-	const signature = signatures[0] as XmlElement;
 
 	const signedInfo = only(signature, "SignedInfo");
 	const method = only(signedInfo, "SignatureMethod").attributes.find(
@@ -194,12 +194,12 @@ function verifyReference(
 	signedInfo: XmlElement,
 ): XmlElement {
 	const references = childrenNamed(signedInfo, DSIG_NS, "Reference");
-	if (references.length !== 1) {
+	const [reference, ...otherReferences] = references;
+	if (reference === undefined || otherReferences.length > 0) {
 		throw new SignatureError(
 			`SignedInfo carries ${references.length} references, and this verifies one`,
 		);
 	}
-	const reference = references[0] as XmlElement;
 
 	const uri = reference.attributes.find((a) => a.local === "URI")?.value;
 	if (uri === undefined || !uri.startsWith("#") || uri.length < 2) {
@@ -214,12 +214,13 @@ function verifyReference(
 			(a) => a.namespaceUri === "" && isIdAttribute(a.local) && a.value === id,
 		),
 	);
-	if (matches.length === 0) {
+	const [signed, ...otherMatches] = matches;
+	if (signed === undefined) {
 		throw new SignatureError(
 			`the reference names '${id}', which is not in the document`,
 		);
 	}
-	if (matches.length > 1) {
+	if (otherMatches.length > 0) {
 		// A second element carrying the signed element's ID is the classic
 		// wrapping payload: the signature stays valid, and a reader that looks
 		// the ID up finds the attacker's copy.
@@ -227,7 +228,6 @@ function verifyReference(
 			`${matches.length} elements carry the id '${id}', which is how a signature gets pointed at the wrong one`,
 		);
 	}
-	const signed = matches[0] as XmlElement;
 
 	if (!contains(signed, signature)) {
 		throw new SignatureError(
@@ -386,12 +386,13 @@ function toCertificate(value: string): X509Certificate {
 /** Exactly one child named `local`, or a clear refusal. */
 function only(parent: XmlElement, local: string): XmlElement {
 	const found = childrenNamed(parent, DSIG_NS, local);
-	if (found.length !== 1) {
+	const [element, ...others] = found;
+	if (element === undefined || others.length > 0) {
 		throw new SignatureError(
 			`expected one <${local}> under <${parent.local}>, and there are ${found.length}`,
 		);
 	}
-	return found[0] as XmlElement;
+	return element;
 }
 
 /** Whether `descendant` sits inside `ancestor`, or is it. */

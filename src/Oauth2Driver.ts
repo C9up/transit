@@ -15,6 +15,7 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fetchWithTimeout } from "./httpTimeout.js";
+import { isRecord, readJsonObject } from "./json.js";
 import type {
 	OAuthConfig,
 	OAuthToken,
@@ -185,7 +186,10 @@ export abstract class Oauth2Driver implements TransitDriver {
 				`${this.provider} OAuth token exchange failed (HTTP ${response.status})`,
 			);
 		}
-		const tokens = (await response.json()) as TokenResponse;
+		const tokens = await readJsonObject(
+			response,
+			`${this.provider} OAuth token response`,
+		);
 		if (!tokens.access_token) {
 			throw new Error(`${this.provider} OAuth: no access_token in response`);
 		}
@@ -217,9 +221,7 @@ export abstract class Oauth2Driver implements TransitDriver {
 		params: Record<string, string> = {},
 	): Promise<Record<string, unknown>> {
 		const body = await this.#requestJson(url, accessToken, params);
-		return typeof body === "object" && body !== null && !Array.isArray(body)
-			? (body as Record<string, unknown>)
-			: {};
+		return isRecord(body) ? body : {};
 	}
 
 	/** The authenticated GET itself, before anything is assumed of the body. */

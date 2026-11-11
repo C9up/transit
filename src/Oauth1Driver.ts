@@ -19,6 +19,7 @@
  */
 
 import { fetchWithTimeout } from "./httpTimeout.js";
+import { readJsonObject } from "./json.js";
 import {
 	authorizationHeader,
 	baseOauthParams,
@@ -174,7 +175,9 @@ export abstract class Oauth1Driver implements TransitDriver {
 				`${this.provider} profile request failed (HTTP ${response.status})`,
 			);
 		}
-		return this.mapUser((await response.json()) as Record<string, unknown>);
+		return this.mapUser(
+			await readJsonObject(response, `${this.provider} profile`),
+		);
 	}
 
 	/** The `oauth_*` set for one request, stamped now. */

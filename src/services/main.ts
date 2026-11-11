@@ -6,7 +6,7 @@
  * with no providers fails on the first sign-in instead of at startup.
  */
 
-import type { TransitManager } from "../TransitManager.js";
+import { TransitManager } from "../TransitManager.js";
 
 let instance: TransitManager | undefined;
 
@@ -48,12 +48,19 @@ function resolve(): TransitManager {
  * `then` when it is imported, and a proxy that threw there would crash the
  * import itself.
  */
-const transit = new Proxy({} as TransitManager, {
+/**
+ * The proxy's target, never read: every access goes to the seated manager. An
+ * empty manager types the proxy without an assertion, and building one opens
+ * nothing.
+ */
+const placeholder = new TransitManager();
+
+const transit: TransitManager = new Proxy(placeholder, {
 	get(_target, property) {
 		if (typeof property === "symbol" || property === "then") return undefined;
 		const value = Reflect.get(resolve(), property);
 		return typeof value === "function" ? value.bind(resolve()) : value;
 	},
-}) as TransitManager;
+});
 
 export default transit;

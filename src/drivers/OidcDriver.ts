@@ -14,6 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import { fetchWithTimeout } from "../httpTimeout.js";
+import { readJsonObject } from "../json.js";
 import {
 	assertIdTokenClaims,
 	decodeJws,
@@ -225,7 +226,7 @@ export class OidcDriver implements TransitDriver {
 				`[transit] OpenID Connect token exchange failed (HTTP ${response.status})`,
 			);
 		}
-		return (await response.json()) as Record<string, unknown>;
+		return readJsonObject(response, "the OpenID Connect token response");
 	}
 
 	/**
@@ -332,7 +333,7 @@ export class OidcDriver implements TransitDriver {
 				`[transit] OpenID Connect userinfo request failed (HTTP ${response.status})`,
 			);
 		}
-		return (await response.json()) as Record<string, unknown>;
+		return readJsonObject(response, "the OpenID Connect userinfo response");
 	}
 }
 

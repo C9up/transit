@@ -10,6 +10,7 @@
  */
 
 import { fetchWithTimeout } from "./httpTimeout.js";
+import { readJsonObject } from "./json.js";
 import type { Jwk } from "./jwt.js";
 
 /** The slice of the discovery document this reads. */
@@ -91,7 +92,10 @@ export class OidcDiscovery {
 				`[transit] OpenID Connect discovery failed for '${this.#issuer}' (HTTP ${response.status})`,
 			);
 		}
-		const body = (await response.json()) as Partial<OidcMetadata>;
+		const body = await readJsonObject(
+			response,
+			`the discovery document of '${this.#issuer}'`,
+		);
 		const metadata = assertMetadata(body, this.#issuer);
 		this.#cached = { metadata, fetchedAt: this.#now() };
 		return metadata;
@@ -169,11 +173,11 @@ export class JwksCache {
 				`[transit] fetching the provider's signing keys failed (HTTP ${response.status})`,
 			);
 		}
-		const body = (await response.json()) as { keys?: unknown };
-		if (!Array.isArray(body.keys)) {
+		const { keys } = await readJsonObject(response, "the provider's JWKS");
+		if (!Array.isArray(keys)) {
 			throw new Error("[transit] the provider's JWKS has no `keys` array");
 		}
-		this.#keys = body.keys.filter(isJwk);
+		this.#keys = keys.filter(isJwk);
 		this.#fetchedAt = this.#now();
 		return this.#keys;
 	}
@@ -188,25 +192,51 @@ function isJwk(value: unknown): value is Jwk {
 }
 
 function assertMetadata(
-	body: Partial<OidcMetadata>,
+	body: Record<string, unknown>,
 	expectedIssuer: string,
 ): OidcMetadata {
-	for (const field of [
-		"issuer",
-		"authorization_endpoint",
-		"token_endpoint",
-		"jwks_uri",
-	] as const) {
-		if (typeof body[field] !== "string" || body[field] === "") {
+	const required = (field: string): string => {
+		const value = body[field];
+		if (typeof value !== "string" || value === "") {
 			throw new Error(
 				`[transit] the discovery document of '${expectedIssuer}' has no ${field}`,
 			);
 		}
-	}
-	if (body.issuer !== expectedIssuer) {
+		return value;
+	};
+	const issuer = required("issuer");
+	const authorizationEndpoint = required("authorization_endpoint");
+	const tokenEndpoint = required("token_endpoint");
+	const jwksUri = required("jwks_uri");
+	if (issuer !== expectedIssuer) {
 		throw new Error(
-			`[transit] discovery answered for issuer '${body.issuer}', not '${expectedIssuer}' — the URL asked is not the authority that replied`,
+			`[transit] discovery answered for issuer '${issuer}', not '${expectedIssuer}' — the URL asked is not the authority that replied`,
 		);
 	}
-	return body as OidcMetadata;
+	const userinfo = body.userinfo_endpoint;
+	const algs = stringList(body.id_token_signing_alg_values_supported);
+	const challenges = stringList(body.code_challenge_methods_supported);
+	return {
+		issuer,
+		authorization_endpoint: authorizationEndpoint,
+		token_endpoint: tokenEndpoint,
+		jwks_uri: jwksUri,
+		...(typeof userinfo === "string" && userinfo !== ""
+			? { userinfo_endpoint: userinfo }
+			: {}),
+		...(algs === undefined
+			? {}
+			: { id_token_signing_alg_values_supported: algs }),
+		...(challenges === undefined
+			? {}
+			: { code_challenge_methods_supported: challenges }),
+	};
+}
+
+/** A list of strings, or `undefined` when the field is not one. */
+function stringList(value: unknown): string[] | undefined {
+	return Array.isArray(value) &&
+		value.every((item): item is string => typeof item === "string")
+		? value
+		: undefined;
 }

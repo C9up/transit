@@ -437,7 +437,7 @@ class Parser {
 	#skipSpace(): void {
 		while (
 			this.#at < this.source.length &&
-			/\s/.test(this.source[this.#at] as string)
+			/\s/.test(this.source.charAt(this.#at))
 		) {
 			this.#at += 1;
 		}

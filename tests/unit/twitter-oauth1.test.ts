@@ -174,6 +174,15 @@ describe("transit > Twitter (OAuth1) > callback", () => {
 		expect(out.token).toEqual({ accessToken: "at", tokenSecret: "ats" });
 	});
 
+	it("refuses a profile that is not a JSON object", async () => {
+		for (const profile of [null, ["42"], "42"]) {
+			stubFetch(accessToken, { ok: true, status: 200, body: profile });
+			await expect(
+				new TwitterDriver(config).callback("verifier", "rt", "rt", "rts"),
+			).rejects.toThrow(/profile is not a JSON object/);
+		}
+	});
+
 	it("keeps the id as a string, which is the only lossless form", async () => {
 		stubFetch(accessToken, {
 			ok: true,

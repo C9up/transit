@@ -60,7 +60,7 @@ export function nonce(): string {
 export function signatureBaseString(input: SignatureInput): string {
 	const url = new URL(input.url);
 	const query: Param[] = [...url.searchParams.entries()].map(
-		([key, value]) => [key, value] as Param,
+		([key, value]): Param => [key, value],
 	);
 
 	const encoded = [...query, ...(input.params ?? []), ...input.oauth]
@@ -98,10 +98,7 @@ export function sign(input: SignatureInput): string {
  * signed but stay where they were.
  */
 export function authorizationHeader(input: SignatureInput): string {
-	const signed: Param[] = [
-		...input.oauth,
-		["oauth_signature", sign(input)] as Param,
-	];
+	const signed: Param[] = [...input.oauth, ["oauth_signature", sign(input)]];
 	const parts = signed
 		.map(([key, value]) => `${percentEncode(key)}="${percentEncode(value)}"`)
 		.join(", ");

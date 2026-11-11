@@ -47,8 +47,10 @@ export function encodeInteger(value: number, tag = INTEGER): Buffer {
 		remaining >>= 8;
 	} while (remaining !== 0 && remaining !== -1);
 	// A leading bit set on a positive number would read as negative.
-	if (value >= 0 && (bytes[0] as number) & 0x80) bytes.unshift(0);
-	if (value < 0 && !((bytes[0] as number) & 0x80)) bytes.unshift(0xff);
+	// `do` ran at least once, so there is a lead byte.
+	const lead = bytes[0] ?? 0;
+	if (value >= 0 && lead & 0x80) bytes.unshift(0);
+	if (value < 0 && !(lead & 0x80)) bytes.unshift(0xff);
 	return encode(tag, Buffer.from(bytes));
 }
 
@@ -78,7 +80,7 @@ export function decode(buffer: Buffer, offset = 0): BerElement {
 	if (offset >= buffer.length) {
 		throw new BerError("the message ends where an element was expected");
 	}
-	const tag = buffer[offset] as number;
+	const tag = buffer.readUInt8(offset);
 	const { length, at } = decodeLength(buffer, offset + 1);
 	const end = at + length;
 	if (end > buffer.length) {
@@ -107,7 +109,7 @@ export function decodeInteger(value: Buffer): number {
 		// Beyond this a result code or message id is not something this reads.
 		throw new BerError(`an integer of ${value.length} bytes is out of range`);
 	}
-	let out = (value[0] as number) & 0x80 ? -1 : 0;
+	let out = value.readInt8(0) < 0 ? -1 : 0;
 	for (const byte of value) out = out * 256 + byte;
 	return out;
 }
@@ -132,7 +134,7 @@ export const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
  */
 export function messageLength(buffer: Buffer): number | undefined {
 	if (buffer.length < 2) return undefined;
-	const first = buffer[1] as number;
+	const first = buffer.readUInt8(1);
 	if (first < 0x80) return 2 + first;
 	const count = first & 0x7f;
 	if (count === 0 || count > 4) {
@@ -141,7 +143,7 @@ export function messageLength(buffer: Buffer): number | undefined {
 	if (buffer.length < 2 + count) return undefined;
 	let length = 0;
 	for (let i = 0; i < count; i += 1) {
-		length = length * 256 + (buffer[2 + i] as number);
+		length = length * 256 + buffer.readUInt8(2 + i);
 	}
 	const total = 2 + count + length;
 	// Refused on the DECLARATION, not once the bytes have arrived: the point is
@@ -172,7 +174,7 @@ function decodeLength(
 	if (offset >= buffer.length) {
 		throw new BerError("an element has no length");
 	}
-	const first = buffer[offset] as number;
+	const first = buffer.readUInt8(offset);
 	if (first < 0x80) return { length: first, at: offset + 1 };
 	const count = first & 0x7f;
 	if (count === 0) {
@@ -187,7 +189,7 @@ function decodeLength(
 	}
 	let length = 0;
 	for (let i = 0; i < count; i += 1) {
-		length = length * 256 + (buffer[offset + 1 + i] as number);
+		length = length * 256 + buffer.readUInt8(offset + 1 + i);
 	}
 	return { length, at: offset + 1 + count };
 }

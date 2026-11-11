@@ -292,22 +292,24 @@ export function assertionInside(signed: XmlElement): XmlElement {
 			element.namespaceUri === SAML_ASSERTION_NS &&
 			element.local === "Assertion",
 	);
-	if (assertions.length !== 1) {
+	const [assertion, ...others] = assertions;
+	if (assertion === undefined || others.length > 0) {
 		throw new SamlError(
 			`the signed element contains ${assertions.length} assertions, and this reads one`,
 		);
 	}
-	return assertions[0] as XmlElement;
+	return assertion;
 }
 
 function one(parent: XmlElement, local: string): XmlElement {
 	const found = childrenNamed(parent, SAML_ASSERTION_NS, local);
-	if (found.length !== 1) {
+	const [element, ...others] = found;
+	if (element === undefined || others.length > 0) {
 		throw new SamlError(
 			`expected one <${local}> in the assertion, and there are ${found.length}`,
 		);
 	}
-	return found[0] as XmlElement;
+	return element;
 }
 
 /** A SAML instant, in seconds. Anything unparseable is treated as absent. */

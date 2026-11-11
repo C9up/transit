@@ -6,6 +6,7 @@
  * and hand it back to `callback()`.
  */
 
+import { isRecord } from "../json.js";
 import { Oauth2Driver } from "../Oauth2Driver.js";
 import type { TransitUser } from "../types.js";
 
@@ -30,10 +31,7 @@ export class TwitterXDriver extends Oauth2Driver {
 
 	protected override mapUser(raw: Record<string, unknown>): TransitUser {
 		// The profile arrives wrapped: `{ data: { ... } }`.
-		const data =
-			typeof raw.data === "object" && raw.data !== null
-				? (raw.data as Record<string, unknown>)
-				: raw;
+		const data = isRecord(raw.data) ? raw.data : raw;
 		return {
 			id: String(data.id ?? ""),
 			email: String(data.confirmed_email ?? ""),

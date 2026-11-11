@@ -351,6 +351,35 @@ describe("transit > social drivers > reading the profile", () => {
 	});
 });
 
+describe("transit > social drivers > what the provider answers", () => {
+	it("refuses a token response that is not a JSON object", async () => {
+		// `null` used to surface as a TypeError reading `access_token`.
+		for (const tokens of [null, ["tok"], "tok"]) {
+			stubFetch(res(true, 200, tokens));
+			await expect(
+				new GitHubDriver(config).callback("code", "s", "s"),
+			).rejects.toThrow(/token response is not a JSON object/);
+		}
+	});
+
+	it("refuses a token response that is not JSON at all", async () => {
+		vi.stubGlobal("fetch", async () => ({
+			ok: true,
+			status: 200,
+			json: async () => JSON.parse("<html>"),
+		}));
+		await expect(
+			new GitHubDriver(config).callback("code", "s", "s"),
+		).rejects.toThrow(/token response is not JSON/);
+	});
+
+	it("reads a profile that is not an object as an empty one", async () => {
+		stubFetch(res(true, 200, { access_token: "tok" }), res(true, 200, null));
+		const out = await new GitHubDriver(config).callback("code", "s", "s");
+		expect(out.user.id).toBe("");
+	});
+});
+
 describe("transit > social drivers > what the provider vouches for", () => {
 	it("reports a verified address as verified", async () => {
 		stubFetch(

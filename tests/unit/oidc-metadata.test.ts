@@ -85,6 +85,34 @@ describe("transit > discovery", () => {
 		);
 	});
 
+	it("refuses a discovery document that is not a JSON object", async () => {
+		for (const body of [null, [metadata], "document"]) {
+			stubFetch({ body });
+			await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
+				/discovery document of .* is not a JSON object/,
+			);
+		}
+	});
+
+	it("keeps only the declared fields, each with the type it must have", async () => {
+		stubFetch({
+			body: {
+				...metadata,
+				userinfo_endpoint: 42,
+				id_token_signing_alg_values_supported: ["RS256", 7],
+				code_challenge_methods_supported: ["S256"],
+				extra: "ignored",
+			},
+		});
+		expect(await new OidcDiscovery(ISSUER).metadata()).toEqual({
+			issuer: ISSUER,
+			authorization_endpoint: `${ISSUER}/auth`,
+			token_endpoint: `${ISSUER}/token`,
+			jwks_uri: `${ISSUER}/jwks`,
+			code_challenge_methods_supported: ["S256"],
+		});
+	});
+
 	it("names the endpoint a document is missing", async () => {
 		const { token_endpoint: _dropped, ...incomplete } = metadata;
 		stubFetch({ body: incomplete });
@@ -214,6 +242,14 @@ describe("transit > signing keys", () => {
 		// needed to pick it.
 		expect((await new JwksCache().key(`${ISSUER}/jwks`, undefined)).kid).toBe(
 			"sig",
+		);
+	});
+
+	it("refuses a JWKS that is not a JSON object", async () => {
+		stubFetch({ body: null });
+
+		await expect(new JwksCache().key(`${ISSUER}/jwks`, "a")).rejects.toThrow(
+			/JWKS is not a JSON object/,
 		);
 	});
 
