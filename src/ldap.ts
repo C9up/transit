@@ -16,7 +16,7 @@
  *     was typed.
  */
 
-import { connect as connectTcp, type Socket } from "node:net";
+import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { connect as connectTls } from "node:tls";
 import {
 	application,
@@ -116,14 +116,19 @@ export class LdapConnection {
 			);
 		}
 		const port = Number(url.port || (secure ? 636 : 389));
-		const host = url.hostname;
+		// An IPv6 literal comes out of the URL in brackets; the socket wants
+		// the bare address.
+		const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
 
 		await new Promise<void>((resolve, reject) => {
 			const socket = secure
 				? connectTls({
 						host,
 						port,
-						servername: host,
+						// TLS names no server by address, and Node refuses one. Without
+						// it the certificate is checked against `host` itself, which
+						// for an address means its IP SANs: verification stays on.
+						...(isIP(host) === 0 ? { servername: host } : {}),
 						rejectUnauthorized: this.#options.rejectUnauthorized !== false,
 					})
 				: connectTcp({ host, port });
