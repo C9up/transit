@@ -327,3 +327,71 @@ describe("transit > ldap > through the manager", () => {
 		).toBeInstanceOf(LdapDirectory);
 	});
 });
+
+describe("transit > ldap > a reply that cannot be read (bug 013)", () => {
+	/** A directory that answers anything with `reply`, then keeps the socket open. */
+	async function hostile(reply: Buffer) {
+		const accepted: Socket[] = [];
+		const evil = createServer((socket) => {
+			accepted.push(socket);
+			socket.on("error", () => {});
+			socket.on("data", () => socket.write(reply));
+		});
+		await new Promise<void>((resolve) => evil.listen(0, "127.0.0.1", resolve));
+		const address = evil.address();
+		const port =
+			typeof address === "object" && address !== null ? address.port : 0;
+		return {
+			accepted,
+			subject: new LdapDirectory({
+				url: `ldap://127.0.0.1:${port}`,
+				baseDn: BASE,
+				loginAttribute: "uid",
+				bindDn: `cn=reader,${BASE}`,
+				bindPassword: "reader-password",
+				allowInsecure: true,
+				timeoutMs: 5_000,
+			}),
+			close: async () => {
+				for (const socket of accepted) socket.destroy();
+				await new Promise<void>((resolve) => evil.close(() => resolve()));
+			},
+		};
+	}
+
+	const REPLIES: [string, Buffer][] = [
+		// A SEQUENCE declaring 2 GiB: over the size guard.
+		[
+			"an oversized declaration",
+			Buffer.from([0x30, 0x84, 0x7f, 0xff, 0xff, 0xff]),
+		],
+		// An indefinite length, which LDAP forbids.
+		["an indefinite length", Buffer.from([0x30, 0x80, 0x00, 0x00])],
+		// Framed, but the INTEGER inside claims more bytes than the SEQUENCE has.
+		["a malformed element", Buffer.from([0x30, 0x03, 0x02, 0x05, 0x01])],
+	];
+
+	for (const [what, reply] of REPLIES) {
+		it(`refuses the sign-in on ${what}, and the process keeps running`, async () => {
+			const uncaught = vi.fn();
+			process.on("uncaughtException", uncaught);
+			const evil = await hostile(reply);
+			try {
+				const started = Date.now();
+				await expect(evil.subject.authenticate("ada", "x")).rejects.toThrow(
+					/cannot be read/,
+				);
+				// Failed on the reply, not on the timeout.
+				expect(Date.now() - started).toBeLessThan(2_000);
+				expect(uncaught).not.toHaveBeenCalled();
+				// The connection that sent it is not kept.
+				await vi.waitFor(() =>
+					expect(evil.accepted.every((socket) => socket.destroyed)).toBe(true),
+				);
+			} finally {
+				process.off("uncaughtException", uncaught);
+				await evil.close();
+			}
+		});
+	}
+});

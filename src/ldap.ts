@@ -306,12 +306,28 @@ export class LdapConnection {
 			);
 			return;
 		}
-		for (;;) {
-			const length = messageLength(this.#buffer);
-			if (length === undefined || this.#buffer.length < length) return;
-			const message = this.#buffer.subarray(0, length);
-			this.#buffer = this.#buffer.subarray(length);
-			this.#dispatch(message);
+		try {
+			for (;;) {
+				const length = messageLength(this.#buffer);
+				if (length === undefined || this.#buffer.length < length) return;
+				const message = this.#buffer.subarray(0, length);
+				this.#buffer = this.#buffer.subarray(length);
+				this.#dispatch(message);
+			}
+		} catch (cause) {
+			// This runs inside the socket's 'data' listener: a throw escaping it
+			// is an uncaught exception, which ends the PROCESS — every request
+			// the application serves, for one bad reply from one directory. A
+			// reply that cannot be framed or decoded fails this connection only,
+			// and nothing more is read from a peer that sent one.
+			this.#buffer = Buffer.alloc(0);
+			this.#socket?.destroy();
+			const reason = cause instanceof Error ? cause.message : String(cause);
+			this.#failAll(
+				new LdapError(
+					`the directory sent a reply that cannot be read: ${reason}`,
+				),
+			);
 		}
 	}
 
