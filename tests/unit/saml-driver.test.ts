@@ -54,6 +54,8 @@ function response(
 		nameId?: string;
 		/** Seconds from now until both expiries the assertion carries. */
 		expiresIn?: number;
+		/** Sign the response too, after the assertion — "sign both". */
+		signResponse?: boolean;
 	} = {},
 ): string {
 	const expiresIn = over.expiresIn ?? 300;
@@ -80,6 +82,22 @@ function response(
 		signatureFor(assertion, assertionId),
 	);
 	const status = over.status ?? "urn:oasis:names:tc:SAML:2.0:status:Success";
+
+	if (over.signResponse) {
+		// The IdP signs the assertion first, then the response around it: the
+		// response's digest covers the assertion's signature too.
+		const responseId = `_r-${requestId}`;
+		const whole =
+			`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="${responseId}">` +
+			"__SIGNATURE__" +
+			`<samlp:Status><samlp:StatusCode Value="${status}"/></samlp:Status>` +
+			signed +
+			"</samlp:Response>";
+		return Buffer.from(
+			whole.replace("__SIGNATURE__", signatureFor(whole, responseId)),
+			"utf8",
+		).toString("base64");
+	}
 
 	return Buffer.from(
 		'<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">' +
@@ -344,6 +362,37 @@ describe("transit > saml > callback", () => {
 				started.secret,
 			),
 		).rejects.toThrow(/this application is/);
+	});
+
+	it("signs in with a response signed at both levels (bug 015)", async () => {
+		// Entra ID "Sign SAML response and assertion", and the equivalent
+		// Okta/Keycloak/ADFS settings.
+		const driver = new SamlDriver(config);
+		const { started, requestId } = await begin(driver);
+
+		const { user } = await driver.callback(
+			response(requestId, { signResponse: true }),
+			started.state,
+			started.state,
+			started.secret,
+		);
+
+		expect(user.id).toBe("ada@acme.test");
+	});
+
+	it("refuses a doubly signed response edited after signing", async () => {
+		const driver = new SamlDriver(config);
+		const { started, requestId } = await begin(driver);
+		const tampered = Buffer.from(
+			Buffer.from(response(requestId, { signResponse: true }), "base64")
+				.toString("utf8")
+				.replace("ada@acme.test", "attacker@evil.test"),
+			"utf8",
+		).toString("base64");
+
+		await expect(
+			driver.callback(tampered, started.state, started.state, started.secret),
+		).rejects.toThrow(/does not match its digest/);
 	});
 
 	it("refuses an assertion edited after it was signed", async () => {

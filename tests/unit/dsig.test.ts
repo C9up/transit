@@ -295,3 +295,78 @@ describe("transit > dsig > tampering", () => {
 		).toThrow(/carries no signature/);
 	});
 });
+
+describe("transit > dsig > a response signed at both levels (bug 015)", () => {
+	const both =
+		'<Response xmlns="urn:oasis:names:tc:SAML:2.0:protocol" ID="r-1">' +
+		"<!--RESPONSE-->" +
+		'<Assertion xmlns="urn:oasis:names:tc:SAML:2.0:assertion" ID="a-1">' +
+		"<!--SIGNATURE-->" +
+		"<Subject>ada@acme.test</Subject>" +
+		"</Assertion>" +
+		"</Response>";
+
+	/** Assertion first, then the response around it — what an IdP does. */
+	function signBoth(xml = both): string {
+		const assertionSigned = sign(xml, "a-1");
+		return sign(
+			assertionSigned.replace("<!--RESPONSE-->", "<!--SIGNATURE-->"),
+			"r-1",
+		);
+	}
+
+	const SIGNATURE = /<ds:Signature[\s\S]*?<\/ds:Signature>/g;
+
+	it("verifies the response's own signature and hands back the response", () => {
+		const signed = verifyXmlSignature(parseXml(signBoth()), { certificates });
+		expect(signed.local).toBe("Response");
+		expect(signed.attributes.find((a) => a.local === "ID")?.value).toBe("r-1");
+	});
+
+	it("refuses it once anything inside was changed", () => {
+		const changed = signBoth().replace("ada@acme.test", "eve@evil.test");
+		expect(() =>
+			verifyXmlSignature(parseXml(changed), { certificates }),
+		).toThrow(/does not match its digest/);
+	});
+
+	it("refuses two signatures neither of which sits on the root", () => {
+		// The assertion carrying two signatures: no response-level signature to
+		// decide which one a reader should trust.
+		const onlyAssertion = sign(both.replace("<!--RESPONSE-->", ""), "a-1");
+		const signatureXml = onlyAssertion.match(SIGNATURE)?.[0] ?? "";
+		const twice = onlyAssertion.replace(
+			"</Assertion>",
+			`${signatureXml}</Assertion>`,
+		);
+		expect(() => verifyXmlSignature(parseXml(twice), { certificates })).toThrow(
+			/carries 2 signatures/,
+		);
+	});
+
+	it("refuses two signatures on the root", () => {
+		const signed = signBoth();
+		const rootSignature = signed.match(SIGNATURE)?.[0] ?? "";
+		const doubled = signed.replace(
+			"</Response>",
+			`${rootSignature}</Response>`,
+		);
+		expect(() =>
+			verifyXmlSignature(parseXml(doubled), { certificates }),
+		).toThrow(/signatures/);
+	});
+
+	it("refuses a root-level signature lifted from another document", () => {
+		// Wrapping: a genuine assertion-only response, with a root signature
+		// copied from another response — it covers that response, not this one.
+		const other = signBoth(both.replace("ada@acme.test", "eve@evil.test"));
+		const lifted = other.match(SIGNATURE)?.[0] ?? "";
+		const target = sign(both.replace("<!--RESPONSE-->", ""), "a-1").replace(
+			'ID="r-1">',
+			`ID="r-1">${lifted}`,
+		);
+		expect(() =>
+			verifyXmlSignature(parseXml(target), { certificates }),
+		).toThrow(/does not match its digest|does not verify/);
+	});
+});

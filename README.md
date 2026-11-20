@@ -147,8 +147,10 @@ route behind the body parser (see the round trip above).
 
 The certificates come from the provider's metadata and nowhere else. The
 element the signature covers is the element that is read — nothing is looked up
-in the document afterwards, which is what closes XML Signature Wrapping. An
-assertion is a bearer token, so its id is remembered for as long as it could
+in the document afterwards, which is what closes XML Signature Wrapping. A
+response signed on both the response and the assertion is verified through the
+response's own signature, which covers the assertion. An assertion is a bearer
+token, so its id is remembered for as long as it could
 still be accepted — its later expiry plus `clockSkewSeconds`.
 
 That record has to be **shared by every replica**, because it is what stops the

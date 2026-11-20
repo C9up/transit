@@ -11,6 +11,10 @@
  *
  * Everything else here exists to make that guarantee hold:
  *
+ *   - One signature — or, when an identity provider signs both the response
+ *     and the assertion, exactly one enveloped in the root over the whole
+ *     document, which is then the one verified (SAML 2.0 core, section 5:
+ *     a signature on the enclosing element covers the enclosed one).
  *   - Exactly one reference. Several is not a shape a signed assertion needs,
  *     and it multiplies what "the signed element" could mean.
  *   - The reference must resolve to exactly ONE element. A second element
@@ -115,16 +119,27 @@ export function verifyXmlSignature(
 		(element) =>
 			element.namespaceUri === DSIG_NS && element.local === "Signature",
 	);
-	const [signature, ...otherSignatures] = signatures;
-	if (signature === undefined) {
+	const [first, ...otherSignatures] = signatures;
+	if (first === undefined) {
 		throw new SignatureError("the document carries no signature");
 	}
+	let signature = first;
 	if (otherSignatures.length > 0) {
-		// Which one covers what a reader will use is exactly the ambiguity
-		// wrapping attacks live in.
-		throw new SignatureError(
-			`the document carries ${signatures.length} signatures, and this verifies documents with one`,
-		);
+		// Several signatures: which one covers what a reader will use is
+		// exactly the ambiguity wrapping attacks live in. One shape is not
+		// ambiguous, and identity providers emit it on purpose ("sign the
+		// response and the assertion"): ONE signature enveloped in the root
+		// itself. It covers the whole document — the inner signatures
+		// included — so the root is what is verified and returned, and the
+		// inner ones are bytes it vouches for, not signatures to choose among.
+		const onRoot = signatures.filter((element) => element.parent === root);
+		const [rootSignature, ...otherRootSignatures] = onRoot;
+		if (rootSignature === undefined || otherRootSignatures.length > 0) {
+			throw new SignatureError(
+				`the document carries ${signatures.length} signatures and ${onRoot.length} of them on the root element, and this verifies one signature, or one on the root over the whole document`,
+			);
+		}
+		signature = rootSignature;
 	}
 
 	const signedInfo = only(signature, "SignedInfo");
@@ -178,7 +193,16 @@ export function verifyXmlSignature(
 		throw new SignatureError("the signature does not verify");
 	}
 
-	return verifyReference(root, signature, signedInfo);
+	const signed = verifyReference(root, signature, signedInfo);
+	if (otherSignatures.length > 0 && signed !== root) {
+		// Enveloped in the root and contained by what it signs, the reference
+		// can only be the root; said out loud, since the inner signatures are
+		// trusted only because this one covers them.
+		throw new SignatureError(
+			"the root's signature does not cover the root, and the document carries other signatures",
+		);
+	}
+	return signed;
 }
 
 /**
