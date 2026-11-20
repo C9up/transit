@@ -90,7 +90,9 @@ controller serve all three.
 
 Sign in with Apple takes a key rather than a secret, its callback arrives as a
 POST, and it sends the user's name exactly once — read it with
-`parseAppleUser(ctx.request.input('user'))` and store it. Being a POST, that
+`parseAppleUser(ctx.request.input('user'))` and store it. Only the name comes
+from that field: its `email` is unsigned form data the person can rewrite, so
+the address is always the id_token's `user.email`. Being a POST, that
 callback needs the body parser in front of it (see the round trip above).
 
 ## LDAP and Active Directory

@@ -80,10 +80,24 @@ describe("transit > apple > the name that comes once", () => {
 			email: "ada@privaterelay.appleid.com",
 		});
 
-		expect(parseAppleUser(field)).toEqual({
-			name: "Ada Lovelace",
-			email: "ada@privaterelay.appleid.com",
+		expect(parseAppleUser(field)).toEqual({ name: "Ada Lovelace" });
+	});
+
+	it("never hands out the email of the unsigned form field (bug 014)", () => {
+		// The `user` field is plain form data: the person signing in can set it
+		// to any address before the browser posts it. Their id_token still
+		// verifies, so an email read here would be an unverified address next
+		// to a verified sign-in — an account takeover on any app that links
+		// or stores accounts by it.
+		const forged = JSON.stringify({
+			name: { firstName: "A" },
+			email: "victim@corp.test",
 		});
+		expect(parseAppleUser(forged)).toEqual({ name: "A" });
+		expect(JSON.stringify(parseAppleUser(forged))).not.toContain("victim");
+		expect(
+			parseAppleUser(JSON.stringify({ email: "victim@corp.test" })),
+		).toBeUndefined();
 	});
 
 	it("answers undefined for a returning user, which sends no name at all", () => {
@@ -102,9 +116,9 @@ describe("transit > apple > the name that comes once", () => {
 		expect(
 			parseAppleUser(JSON.stringify({ name: { firstName: "Ada" } })),
 		).toEqual({ name: "Ada" });
-		expect(parseAppleUser(JSON.stringify({ email: "ada@acme.test" }))).toEqual({
-			email: "ada@acme.test",
-		});
+		expect(
+			parseAppleUser(JSON.stringify({ name: { lastName: "Lovelace" } })),
+		).toEqual({ name: "Lovelace" });
 	});
 });
 

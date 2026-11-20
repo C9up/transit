@@ -64,12 +64,16 @@ export function appleClientSecret(
  * comes out — the id_token never carries a name, and a second sign-in by the
  * same person will not carry one either.
  *
+ * Only the NAME is read. The field also holds an `email`, but it is plain form
+ * data, signed by nothing: the person signing in can set it to any address
+ * before their browser posts it, and their id_token still verifies. The
+ * address comes from the verified id_token (`user.email`, with
+ * `emailVerificationState`), never from here.
+ *
  * Returns `undefined` for anything unreadable rather than throwing: a returning
  * user simply has no `user` field, and that is the normal case.
  */
-export function parseAppleUser(
-	value: unknown,
-): { name?: string; email?: string } | undefined {
+export function parseAppleUser(value: unknown): { name: string } | undefined {
 	if (typeof value !== "string" || value === "") return undefined;
 	let parsed: unknown;
 	try {
@@ -79,7 +83,6 @@ export function parseAppleUser(
 	}
 	if (typeof parsed !== "object" || parsed === null) return undefined;
 
-	const email = Reflect.get(parsed, "email");
 	const rawName = Reflect.get(parsed, "name");
 	const name =
 		typeof rawName === "object" && rawName !== null
@@ -90,10 +93,7 @@ export function parseAppleUser(
 					.join(" ")
 			: undefined;
 
-	const out: { name?: string; email?: string } = {};
-	if (name) out.name = name;
-	if (typeof email === "string" && email !== "") out.email = email;
-	return Object.keys(out).length > 0 ? out : undefined;
+	return name ? { name } : undefined;
 }
 
 function b64(value: unknown): string {
