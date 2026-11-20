@@ -114,6 +114,58 @@ describe("transit > replay > in Redis", () => {
 
 		expect(resolve).toHaveBeenCalledTimes(1);
 	});
+
+	// Quasar retires a connection whose retry strategy gave up and hands out a
+	// fresh one. Keeping the dead client refused every SAML sign-in until the
+	// process restarted.
+	it("resolves again once the client it kept has ended for good", async () => {
+		const first = Object.assign(fakeRedis(), { status: "ready" });
+		const second = Object.assign(fakeRedis(), { status: "ready" });
+		const resolve = vi
+			.fn<() => ReplayRedisClient>()
+			.mockReturnValueOnce(first)
+			.mockReturnValueOnce(second);
+		const store = new RedisAssertionReplayStore(resolve);
+
+		await store.remember("a-1", inFiveMinutes());
+		first.status = "end";
+		expect(await store.remember("a-2", inFiveMinutes())).toBe(true);
+
+		expect(resolve).toHaveBeenCalledTimes(2);
+		expect(second.calls).toHaveLength(1);
+	});
+
+	it("keeps a client that closed but reconnects, and one handed in directly", async () => {
+		const resolved = Object.assign(fakeRedis(), { status: "ready" });
+		const resolve = vi.fn(() => resolved);
+		const store = new RedisAssertionReplayStore(resolve);
+		await store.remember("a-1", inFiveMinutes());
+		resolved.status = "close";
+		await store.remember("a-2", inFiveMinutes());
+		expect(resolve).toHaveBeenCalledOnce();
+
+		const direct = Object.assign(fakeRedis(), { status: "end" });
+		await new RedisAssertionReplayStore(direct).remember(
+			"a-1",
+			inFiveMinutes(),
+		);
+		expect(direct.calls).toHaveLength(1);
+	});
+
+	// Still failing closed while the resolution fails — but not for good.
+	it("forgets a resolution that failed, so the next assertion asks again", async () => {
+		const redis = fakeRedis();
+		const resolve = vi
+			.fn<() => Promise<ReplayRedisClient>>()
+			.mockRejectedValueOnce(new Error("quasar not booted yet"))
+			.mockResolvedValueOnce(redis);
+		const store = new RedisAssertionReplayStore(resolve);
+
+		await expect(store.remember("a-1", inFiveMinutes())).rejects.toThrow(
+			/not booted/,
+		);
+		expect(await store.remember("a-1", inFiveMinutes())).toBe(true);
+	});
 });
 
 describe("transit > replay > the helpers", () => {

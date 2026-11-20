@@ -12,7 +12,7 @@
  */
 
 import { quasarConnection } from "./quasar.js";
-import { hasCommands } from "./vendor/quasarConnection.js";
+import { hasCommands, hasEnded } from "./vendor/quasarConnection.js";
 
 export interface AssertionReplayStore {
 	/**
@@ -81,6 +81,8 @@ export class RedisAssertionReplayStore implements AssertionReplayStore {
 	readonly #source: ReplayRedisResolver;
 	readonly #prefix: string;
 	#resolved: Promise<ReplayRedisClient> | undefined;
+	/** What {@link #resolved} settled to, so its state can be read. */
+	#settled: ReplayRedisClient | undefined;
 
 	constructor(client: ReplayRedisResolver, options: RedisReplayOptions = {}) {
 		this.#source = client;
@@ -106,10 +108,32 @@ export class RedisAssertionReplayStore implements AssertionReplayStore {
 		return stored !== null && stored !== undefined;
 	}
 
+	/**
+	 * The client, resolved once and shared by concurrent sign-ins — but neither
+	 * a failed resolution nor a client that has ended for good is kept: quasar
+	 * retires a connection whose retry strategy gave up and hands out a fresh
+	 * one, and keeping either refused every SAML sign-in until restart. Still
+	 * fail-closed: while the resolution fails, `remember` rejects. A client
+	 * handed in directly is kept whatever its state.
+	 */
 	#client(): Promise<ReplayRedisClient> {
-		this.#resolved ??= Promise.resolve(
-			typeof this.#source === "function" ? this.#source() : this.#source,
-		);
+		if (typeof this.#source === "function" && hasEnded(this.#settled)) {
+			this.#resolved = undefined;
+			this.#settled = undefined;
+		}
+		if (this.#resolved === undefined) {
+			const source = this.#source;
+			const attempt = Promise.resolve()
+				.then(() => (typeof source === "function" ? source() : source))
+				.then((client) => {
+					if (this.#resolved === attempt) this.#settled = client;
+					return client;
+				});
+			attempt.catch(() => {
+				if (this.#resolved === attempt) this.#resolved = undefined;
+			});
+			this.#resolved = attempt;
+		}
 		return this.#resolved;
 	}
 }
