@@ -18,6 +18,7 @@
  * the secret kept from `begin()`.
  */
 
+import type { AuthorizeCustomizer } from "./AuthorizeRequest.js";
 import { fetchWithTimeout } from "./httpTimeout.js";
 import { readJsonObject } from "./json.js";
 import {
@@ -74,7 +75,17 @@ export abstract class Oauth1Driver implements TransitDriver {
 	 * two values to keep: the token, which the callback has to match, and its
 	 * secret, without which the exchange cannot be signed.
 	 */
-	async begin(): Promise<RedirectRequest> {
+	async begin(
+		_state?: string,
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest> {
+		if (customize !== undefined) {
+			// Refused rather than ignored: a scope asked for and silently not
+			// requested is found much later, on the first call that needs it.
+			throw new Error(
+				`[transit] ${this.provider} uses OAuth1, which has no per-request scopes or authorize parameters.`,
+			);
+		}
 		const oauth = this.#oauth();
 		oauth.push(["oauth_callback", this.config.callbackUrl]);
 

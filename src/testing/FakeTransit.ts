@@ -22,6 +22,10 @@
  */
 
 import { randomUUID } from "node:crypto";
+import {
+	type AuthorizeCustomizer,
+	customizeAuthorize,
+} from "../AuthorizeRequest.js";
 import { TransitManager } from "../TransitManager.js";
 import type { OAuthToken, RedirectRequest, TransitUser } from "../types.js";
 import { assertOAuthState } from "../types.js";
@@ -35,6 +39,8 @@ export interface BegunSignIn {
 	name: string;
 	state: string;
 	secret: string;
+	/** What a per-request `customize` callback asked for, when one was given. */
+	authorize?: { scopes: string[]; params: Record<string, string> };
 }
 
 export interface CompletedSignIn {
@@ -90,10 +96,33 @@ export class FakeTransit extends TransitManager {
 
 	override async begin(
 		name: string,
-		state: string = randomUUID(),
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest>;
+	override async begin(
+		name: string,
+		state?: string,
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest>;
+	override async begin(
+		name: string,
+		stateOrCustomize?: string | AuthorizeCustomizer,
+		maybeCustomize?: AuthorizeCustomizer,
 	): Promise<RedirectRequest> {
+		const state =
+			typeof stateOrCustomize === "string" ? stateOrCustomize : randomUUID();
+		const customize =
+			typeof stateOrCustomize === "function"
+				? stateOrCustomize
+				: maybeCustomize;
 		const secret = randomUUID();
-		this.begun.push({ name, state, secret });
+		this.begun.push({
+			name,
+			state,
+			secret,
+			...(customize
+				? { authorize: customizeAuthorize([], {}, customize) }
+				: {}),
+		});
 		return {
 			url: `https://transit.test/${encodeURIComponent(name)}?state=${encodeURIComponent(state)}`,
 			state,

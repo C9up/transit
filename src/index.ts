@@ -8,6 +8,11 @@
 
 import "./augmentations.js";
 
+export {
+	type AuthorizeCustomizer,
+	AuthorizeRequest,
+	E_TRANSIT_PROTECTED_PARAMETER,
+} from "./AuthorizeRequest.js";
 export { type AppleKey, appleClientSecret, parseAppleUser } from "./apple.js";
 export { type CanonicalizeOptions, canonicalize } from "./c14n.js";
 export type {

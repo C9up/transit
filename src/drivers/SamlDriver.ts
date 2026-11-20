@@ -13,6 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
+import type { AuthorizeCustomizer } from "../AuthorizeRequest.js";
 import { verifyXmlSignature } from "../dsig.js";
 import {
 	type AssertionReplayStore,
@@ -166,7 +167,15 @@ export class SamlDriver implements TransitDriver {
 		);
 	}
 
-	async begin(state: string = randomUUID()): Promise<RedirectRequest> {
+	async begin(
+		state: string = randomUUID(),
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest> {
+		if (customize !== undefined) {
+			throw new Error(
+				"[transit] a SAML sign-in has no scopes or authorize parameters to adjust per request.",
+			);
+		}
 		// A SAML id is an XML name: it may not start with a digit, and a bare
 		// UUID often does.
 		const requestId = `_${randomUUID()}`;

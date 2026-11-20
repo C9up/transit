@@ -14,6 +14,10 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+	type AuthorizeCustomizer,
+	customizeAuthorize,
+} from "./AuthorizeRequest.js";
 import { fetchWithTimeout } from "./httpTimeout.js";
 import { isRecord, readJsonObject } from "./json.js";
 import type {
@@ -85,14 +89,22 @@ export abstract class Oauth2Driver implements TransitDriver {
 		return [...(this.config.scopes ?? this.defaultScopes)];
 	}
 
-	redirectUrl(state?: string, secret?: string): string {
+	redirectUrl(
+		state?: string,
+		secret?: string,
+		customize?: AuthorizeCustomizer,
+	): string {
+		const asked = customizeAuthorize(
+			this.scopes(),
+			{ ...this.authorizeParams(), ...this.config.authorizeParams },
+			customize,
+		);
 		const params = new URLSearchParams({
+			...asked.params,
 			client_id: this.config.clientId,
 			redirect_uri: this.config.callbackUrl,
 			response_type: "code",
-			scope: this.scopes().join(" "),
-			...this.authorizeParams(),
-			...this.config.authorizeParams,
+			scope: asked.scopes.join(" "),
 			...(state ? { state } : {}),
 		});
 
@@ -115,10 +127,15 @@ export abstract class Oauth2Driver implements TransitDriver {
 	 * and a provider requiring PKCE gets its verifier without the caller
 	 * having to know it needed one.
 	 */
-	async begin(state: string = randomUUID()): Promise<RedirectRequest> {
-		if (!this.requiresPkce) return { url: this.redirectUrl(state), state };
+	async begin(
+		state: string = randomUUID(),
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest> {
+		if (!this.requiresPkce) {
+			return { url: this.redirectUrl(state, undefined, customize), state };
+		}
 		const secret = createCodeVerifier();
-		return { url: this.redirectUrl(state, secret), state, secret };
+		return { url: this.redirectUrl(state, secret, customize), state, secret };
 	}
 
 	async callback(

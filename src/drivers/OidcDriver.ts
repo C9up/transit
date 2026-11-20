@@ -13,6 +13,10 @@
  */
 
 import { randomUUID } from "node:crypto";
+import {
+	type AuthorizeCustomizer,
+	customizeAuthorize,
+} from "../AuthorizeRequest.js";
 import { fetchWithTimeout } from "../httpTimeout.js";
 import { readJsonObject } from "../json.js";
 import {
@@ -92,19 +96,27 @@ export class OidcDriver implements TransitDriver {
 		);
 	}
 
-	async begin(state: string = randomUUID()): Promise<RedirectRequest> {
+	async begin(
+		state: string = randomUUID(),
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest> {
 		const metadata = await this.#discovery.metadata();
 		const verifier = createCodeVerifier();
 		const nonce = randomUUID();
 
+		const asked = customizeAuthorize(
+			this.#scopes(),
+			{ ...this.#config.authorizeParams },
+			customize,
+		);
 		const params = new URLSearchParams({
+			...asked.params,
 			client_id: this.#config.clientId,
 			redirect_uri: this.#config.callbackUrl,
 			response_type: "code",
-			scope: this.#scopes().join(" "),
+			scope: withOpenid(asked.scopes).join(" "),
 			state,
 			nonce,
-			...this.#config.authorizeParams,
 		});
 
 		// PKCE is not optional for a public client and costs nothing for a
@@ -192,11 +204,7 @@ export class OidcDriver implements TransitDriver {
 	}
 
 	#scopes(): string[] {
-		const scopes = [...(this.#config.scopes ?? ["openid", "profile", "email"])];
-		// Without `openid` the provider runs a plain OAuth2 flow and returns no
-		// id_token, which fails later with a much less obvious message.
-		if (!scopes.includes("openid")) scopes.unshift("openid");
-		return scopes;
+		return withOpenid(this.#config.scopes ?? ["openid", "profile", "email"]);
 	}
 
 	async #exchange(
@@ -361,6 +369,15 @@ export function mapOidcUser(raw: Record<string, unknown>): TransitUser {
 function str(raw: Record<string, unknown>, key: string): string | undefined {
 	const value = raw[key];
 	return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * `scopes` with `openid` first when it is missing. Without it the provider
+ * runs a plain OAuth2 flow and returns no id_token, which fails later with a
+ * much less obvious message — so a per-request `clearScopes()` keeps it too.
+ */
+function withOpenid(scopes: readonly string[]): string[] {
+	return scopes.includes("openid") ? [...scopes] : ["openid", ...scopes];
 }
 
 /** Split the value `begin()` asked the caller to keep. */

@@ -3,6 +3,7 @@
  */
 
 import { timingSafeEqual } from "node:crypto";
+import type { AuthorizeCustomizer } from "./AuthorizeRequest.js";
 export interface OAuthConfig {
 	clientId: string;
 	clientSecret: string;
@@ -73,13 +74,23 @@ export interface TransitDriver {
 	 * A provider whose redirect needs a round trip of its own — OAuth1 — cannot
 	 * answer here at all and throws; use {@link TransitDriver.begin}.
 	 */
-	redirectUrl(state?: string, secret?: string): string;
+	redirectUrl(
+		state?: string,
+		secret?: string,
+		customize?: AuthorizeCustomizer,
+	): string;
 	/**
 	 * Where to send the user, plus whatever has to be kept until they come
 	 * back. Works for every provider, including the ones `redirectUrl` cannot
 	 * serve, so it is the path to reach for.
+	 *
+	 * `customize` adjusts the scopes and authorize parameters of this one
+	 * redirect (OAuth2 and OpenID Connect providers; the others refuse it).
 	 */
-	begin?(state?: string): Promise<RedirectRequest>;
+	begin?(
+		state?: string,
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest>;
 	/**
 	 * Handle the OAuth callback. `state` MUST be validated against the value
 	 * originally passed to `redirectUrl()` to prevent CSRF login attacks.

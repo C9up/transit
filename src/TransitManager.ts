@@ -10,6 +10,10 @@
  */
 
 import type {
+	AuthorizeCustomizer,
+	AuthorizeRequest,
+} from "./AuthorizeRequest.js";
+import type {
 	DirectoryDriver,
 	OAuthToken,
 	RedirectRequest,
@@ -77,15 +81,35 @@ export class TransitManager {
 	 * This is the path that works for every provider: it mints the state,
 	 * fetches a request token where the protocol needs one, and returns the
 	 * secret to store when there is one.
+	 *
+	 * `customize` adjusts what this one redirect asks for — upstream's
+	 * redirect callback, on an {@link AuthorizeRequest}:
+	 *
+	 *   transit.begin('github', (request) => request.mergeScopes(['repo']))
 	 */
-	async begin(name: string, state?: string): Promise<RedirectRequest> {
+	async begin(
+		name: string,
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest>;
+	async begin(
+		name: string,
+		state?: string,
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest>;
+	async begin(
+		name: string,
+		stateOrCustomize?: string | AuthorizeCustomizer,
+		customize?: AuthorizeCustomizer,
+	): Promise<RedirectRequest> {
 		const driver = this.use(name);
 		if (typeof driver.begin !== "function") {
 			throw new Error(
 				`[transit] The '${name}' driver does not support begin(); use redirect().`,
 			);
 		}
-		return driver.begin(state);
+		return typeof stateOrCustomize === "function"
+			? driver.begin(undefined, stateOrCustomize)
+			: driver.begin(stateOrCustomize, customize);
 	}
 
 	/**
@@ -95,8 +119,13 @@ export class TransitManager {
 	 *
 	 * An OAuth1 provider cannot answer here; call {@link begin} instead.
 	 */
-	redirect(name: string, state?: string, secret?: string): string {
-		return this.use(name).redirectUrl(state, secret);
+	redirect(
+		name: string,
+		state?: string,
+		secret?: string,
+		customize?: AuthorizeCustomizer,
+	): string {
+		return this.use(name).redirectUrl(state, secret, customize);
 	}
 
 	/**

@@ -83,6 +83,18 @@ provider, the PKCE verifier for one that mandates it, and the request-token
 secret for OAuth1 — storing and returning it unconditionally is what lets one
 controller serve all three.
 
+One redirect can ask for more than the config does — OAuth2 and OpenID Connect
+providers take a callback on `begin()` and `redirect()`:
+
+```ts
+await transit.begin('github', (request) => {
+  request.mergeScopes(['repo']).param('prompt', 'consent')
+})
+```
+
+`state`, `nonce`, the PKCE challenge, `client_id`, `redirect_uri` and
+`response_type` cannot be changed there.
+
 ## Providers
 
 `socials.apple`, `.discord`, `.facebook`, `.github`, `.google`, `.linkedin`,
