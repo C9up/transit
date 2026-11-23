@@ -4,6 +4,11 @@
 
 import { timingSafeEqual } from "node:crypto";
 import type { AuthorizeCustomizer } from "./AuthorizeRequest.js";
+import {
+	E_OAUTH_MISSING_CODE,
+	E_OAUTH_STATE_MISMATCH,
+	E_TRANSIT_STATE_REQUIRED,
+} from "./errors.js";
 export interface OAuthConfig {
 	clientId: string;
 	clientSecret: string;
@@ -138,6 +143,16 @@ export function isDirectory(entry: TransitEntry): entry is DirectoryDriver {
 }
 
 /**
+ * Refuse a callback that came back without its grant (`param` names the
+ * request parameter that carries it) before anything is sent to the
+ * provider. The provider sends none when the user denied access; exchanging
+ * nothing would only come back as a provider error.
+ */
+export function assertOAuthCode(code: string | undefined, param: string): void {
+	if (!code) throw new E_OAUTH_MISSING_CODE([param]);
+}
+
+/**
  * Check the OAuth `state` round-trip, failing CLOSED.
  *
  * The check used to be `if (expectedState && state !== expectedState)`, so a
@@ -151,13 +166,13 @@ export function assertOAuthState(
 	expectedState: string | undefined,
 ): void {
 	if (!expectedState) {
-		throw new Error(
+		throw new E_TRANSIT_STATE_REQUIRED([
 			"[transit] OAuth callback requires expectedState for CSRF protection. " +
 				"Store the state given to redirectUrl() in the session and pass it here.",
-		);
+		]);
 	}
 	if (state === undefined || !sameSecret(state, expectedState)) {
-		throw new Error("OAuth state mismatch — possible CSRF attack");
+		throw new E_OAUTH_STATE_MISMATCH();
 	}
 }
 

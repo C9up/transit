@@ -6,6 +6,8 @@
  * string answers with a refusal rather than a TypeError deep in a sign-in.
  */
 
+import { E_TRANSIT_INVALID_RESPONSE } from "./errors.js";
+
 /** A plain JSON object: not `null`, not a list. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -20,10 +22,12 @@ export async function readJsonObject(
 	try {
 		body = await response.json();
 	} catch {
-		throw new Error(`[transit] ${what} is not JSON`);
+		throw new E_TRANSIT_INVALID_RESPONSE([`[transit] ${what} is not JSON`]);
 	}
 	if (!isRecord(body)) {
-		throw new Error(`[transit] ${what} is not a JSON object`);
+		throw new E_TRANSIT_INVALID_RESPONSE([
+			`[transit] ${what} is not a JSON object`,
+		]);
 	}
 	return body;
 }

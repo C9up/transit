@@ -26,6 +26,12 @@ import {
 	type AuthorizeCustomizer,
 	customizeAuthorize,
 } from "../AuthorizeRequest.js";
+import {
+	E_TRANSIT_FAKE_ASSERTION,
+	E_TRANSIT_FAKE_NOT_DECLARED,
+	E_TRANSIT_LDAP_ERROR,
+	E_TRANSIT_MISSING_SECRET,
+} from "../errors.js";
 import { TransitManager } from "../TransitManager.js";
 import type { OAuthToken, RedirectRequest, TransitUser } from "../types.js";
 import { assertOAuthState } from "../types.js";
@@ -149,16 +155,16 @@ export class FakeTransit extends TransitManager {
 
 		const started = this.begun.find((entry) => entry.name === name);
 		if (started?.secret && secret !== started.secret) {
-			throw new Error(
+			throw new E_TRANSIT_MISSING_SECRET([
 				`[transit] the callback for '${name}' did not carry the value begin() returned as \`secret\` — store it with the state.`,
-			);
+			]);
 		}
 
 		const user = this.#identities.get(name);
 		if (!user) {
-			throw new Error(
+			throw new E_TRANSIT_FAKE_NOT_DECLARED([
 				`[transit] nothing declared for '${name}'. Call willReturn('${name}', …) before the sign-in runs.`,
-			);
+			]);
 		}
 		this.signedIn.push({ name, user });
 		return { user, token: this.#tokens.get(name) ?? DEFAULT_TOKEN };
@@ -178,28 +184,36 @@ export class FakeTransit extends TransitManager {
 		password: string,
 	): Promise<TransitUser> {
 		if (password === "") {
-			throw new Error(
-				"[transit] a password is required — an empty one is an anonymous bind, which the directory would accept",
+			throw new E_TRANSIT_LDAP_ERROR(
+				"a password is required — an empty one is an anonymous bind, which the directory would accept",
+				undefined,
+				{
+					status: 400,
+				},
 			);
 		}
 		if (username === "") {
-			throw new Error("[transit] a username is required");
+			throw new E_TRANSIT_LDAP_ERROR("a username is required", undefined, {
+				status: 400,
+			});
 		}
 		const user = this.#identities.get(name);
 		if (!user) {
-			throw new Error(
+			throw new E_TRANSIT_FAKE_NOT_DECLARED([
 				`[transit] nothing declared for '${name}'. Call willReturn('${name}', …) before the sign-in runs.`,
-			);
+			]);
 		}
 		const credentials = this.#credentials.get(name);
 		if (credentials && credentials.password !== password) {
-			throw new Error(
-				"[transit] the directory refused the bind: invalid credentials",
+			throw new E_TRANSIT_LDAP_ERROR(
+				"the directory refused the bind: invalid credentials",
+				49,
 			);
 		}
 		if (credentials && credentials.username !== username) {
-			throw new Error(
-				"[transit] the directory refused the bind: invalid credentials",
+			throw new E_TRANSIT_LDAP_ERROR(
+				"the directory refused the bind: invalid credentials",
+				49,
 			);
 		}
 		this.signedIn.push({ name, user });
@@ -209,9 +223,9 @@ export class FakeTransit extends TransitManager {
 	override async userFromToken(name: string): Promise<TransitUser> {
 		const user = this.#identities.get(name);
 		if (!user) {
-			throw new Error(
+			throw new E_TRANSIT_FAKE_NOT_DECLARED([
 				`[transit] nothing declared for '${name}'. Call willReturn('${name}', …) first.`,
-			);
+			]);
 		}
 		return user;
 	}
@@ -219,27 +233,27 @@ export class FakeTransit extends TransitManager {
 	/** A sign-in through `name` was started. */
 	assertBegan(name: string): void {
 		if (!this.begun.some((entry) => entry.name === name)) {
-			throw new Error(
+			throw new E_TRANSIT_FAKE_ASSERTION([
 				`Expected a sign-in to begin through '${name}'. ${this.#saw(this.begun.map((e) => e.name))}`,
-			);
+			]);
 		}
 	}
 
 	/** A sign-in through `name` completed. */
 	assertSignedIn(name: string): void {
 		if (!this.signedIn.some((entry) => entry.name === name)) {
-			throw new Error(
+			throw new E_TRANSIT_FAKE_ASSERTION([
 				`Expected a sign-in to complete through '${name}'. ${this.#saw(this.signedIn.map((e) => e.name))}`,
-			);
+			]);
 		}
 	}
 
 	/** Nobody was signed in — what a rejected callback should leave behind. */
 	assertNobodySignedIn(): void {
 		if (this.signedIn.length > 0) {
-			throw new Error(
+			throw new E_TRANSIT_FAKE_ASSERTION([
 				`Expected nobody to be signed in, and ${this.signedIn.length} was: ${this.signedIn.map((e) => e.name).join(", ")}`,
-			);
+			]);
 		}
 	}
 

@@ -19,6 +19,16 @@
  */
 
 import type { AuthorizeCustomizer } from "./AuthorizeRequest.js";
+import {
+	E_TRANSIT_CALLBACK_NOT_CONFIRMED,
+	E_TRANSIT_MISSING_SECRET,
+	E_TRANSIT_NO_ACCESS_TOKEN,
+	E_TRANSIT_NO_AUTHORIZE_PARAMS,
+	E_TRANSIT_NO_REQUEST_TOKEN,
+	E_TRANSIT_PROFILE_REQUEST_FAILED,
+	E_TRANSIT_TOKEN_EXCHANGE_FAILED,
+	E_TRANSIT_USE_BEGIN,
+} from "./errors.js";
 import { fetchWithTimeout } from "./httpTimeout.js";
 import { readJsonObject } from "./json.js";
 import {
@@ -35,7 +45,7 @@ import type {
 	TransitDriver,
 	TransitUser,
 } from "./types.js";
-import { assertOAuthState } from "./types.js";
+import { assertOAuthCode, assertOAuthState } from "./types.js";
 
 export abstract class Oauth1Driver implements TransitDriver {
 	/** Named in errors, so a failure says which provider refused. */
@@ -65,9 +75,9 @@ export abstract class Oauth1Driver implements TransitDriver {
 	 * that would be refused.
 	 */
 	redirectUrl(): string {
-		throw new Error(
+		throw new E_TRANSIT_USE_BEGIN([
 			`[transit] ${this.provider} uses OAuth1, whose redirect needs a request token from the provider. Use begin() instead of redirect().`,
-		);
+		]);
 	}
 
 	/**
@@ -82,9 +92,9 @@ export abstract class Oauth1Driver implements TransitDriver {
 		if (customize !== undefined) {
 			// Refused rather than ignored: a scope asked for and silently not
 			// requested is found much later, on the first call that needs it.
-			throw new Error(
+			throw new E_TRANSIT_NO_AUTHORIZE_PARAMS([
 				`[transit] ${this.provider} uses OAuth1, which has no per-request scopes or authorize parameters.`,
-			);
+			]);
 		}
 		const oauth = this.#oauth();
 		oauth.push(["oauth_callback", this.config.callbackUrl]);
@@ -93,16 +103,15 @@ export abstract class Oauth1Driver implements TransitDriver {
 		if (body.oauth_callback_confirmed !== "true") {
 			// The provider rejects a callback URL it does not have registered,
 			// and says so here rather than at the end of the flow.
-			throw new Error(
-				`${this.provider} did not confirm the callback URL — check that '${this.config.callbackUrl}' is registered on the application.`,
-			);
+			throw new E_TRANSIT_CALLBACK_NOT_CONFIRMED([
+				this.provider,
+				this.config.callbackUrl,
+			]);
 		}
 		const token = body.oauth_token;
 		const secret = body.oauth_token_secret;
 		if (!token || !secret) {
-			throw new Error(
-				`${this.provider} OAuth: no request token in the response`,
-			);
+			throw new E_TRANSIT_NO_REQUEST_TOKEN([this.provider]);
 		}
 
 		return {
@@ -123,11 +132,12 @@ export abstract class Oauth1Driver implements TransitDriver {
 		expectedState?: string,
 		secret?: string,
 	): Promise<{ user: TransitUser; token: OAuthToken }> {
+		assertOAuthCode(code, "oauth_verifier");
 		assertOAuthState(state, expectedState);
 		if (!secret) {
-			throw new Error(
+			throw new E_TRANSIT_MISSING_SECRET([
 				`[transit] ${this.provider} needs the request-token secret from begin() — store it with the token and pass it back here.`,
-			);
+			]);
 		}
 
 		const oauth = this.#oauth(expectedState);
@@ -137,7 +147,9 @@ export abstract class Oauth1Driver implements TransitDriver {
 		const accessToken = body.oauth_token;
 		const tokenSecret = body.oauth_token_secret;
 		if (!accessToken || !tokenSecret) {
-			throw new Error(`${this.provider} OAuth: no access token in response`);
+			throw new E_TRANSIT_NO_ACCESS_TOKEN([
+				`${this.provider} OAuth: no access token in response`,
+			]);
 		}
 
 		const user = await this.fetchUser(accessToken, tokenSecret);
@@ -153,9 +165,9 @@ export abstract class Oauth1Driver implements TransitDriver {
 		tokenSecret?: string,
 	): Promise<TransitUser> {
 		if (!tokenSecret) {
-			throw new Error(
+			throw new E_TRANSIT_MISSING_SECRET([
 				`[transit] ${this.provider} needs the token secret as well: an OAuth1 access token cannot sign a request on its own.`,
-			);
+			]);
 		}
 		return this.fetchUser(accessToken, tokenSecret);
 	}
@@ -182,9 +194,9 @@ export abstract class Oauth1Driver implements TransitDriver {
 			},
 		});
 		if (!response.ok) {
-			throw new Error(
+			throw new E_TRANSIT_PROFILE_REQUEST_FAILED([
 				`${this.provider} profile request failed (HTTP ${response.status})`,
-			);
+			]);
 		}
 		return this.mapUser(
 			await readJsonObject(response, `${this.provider} profile`),
@@ -221,9 +233,9 @@ export abstract class Oauth1Driver implements TransitDriver {
 			},
 		});
 		if (!response.ok) {
-			throw new Error(
+			throw new E_TRANSIT_TOKEN_EXCHANGE_FAILED([
 				`${this.provider} OAuth token exchange failed (HTTP ${response.status})`,
-			);
+			]);
 		}
 		// These endpoints answer `key=value&…`, not JSON.
 		return parseFormBody(await response.text());

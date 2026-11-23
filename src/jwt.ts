@@ -22,6 +22,7 @@ import {
 	createVerify,
 	verify as verifySignature,
 } from "node:crypto";
+import { E_TRANSIT_INVALID_ID_TOKEN } from "./errors.js";
 import { isRecord } from "./json.js";
 
 /** A public key as a provider publishes it. */
@@ -92,7 +93,9 @@ export function decodeJws(token: string): Parts {
 		encodedSignature === undefined ||
 		extra.length > 0
 	) {
-		throw new Error("[transit] id_token is not a compact JWS (three segments)");
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
+			"[transit] id_token is not a compact JWS (three segments)",
+		]);
 	}
 	return {
 		header: decodeSegment(encodedHeader, "header"),
@@ -176,14 +179,16 @@ export function assertIdTokenClaims(
 
 	const iss = payload.iss;
 	if (typeof iss !== "string" || iss !== expected.issuer) {
-		throw new Error(
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
 			`[transit] id_token issuer mismatch: expected '${expected.issuer}'`,
-		);
+		]);
 	}
 
 	const sub = payload.sub;
 	if (typeof sub !== "string" || sub === "") {
-		throw new Error("[transit] id_token carries no subject");
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
+			"[transit] id_token carries no subject",
+		]);
 	}
 
 	const aud = payload.aud;
@@ -191,44 +196,50 @@ export function assertIdTokenClaims(
 		// Checked, not assumed: `includes` below would pass on a list holding the
 		// right string among arbitrary junk, and the claim would then be handed
 		// on described as a string it is not.
-		throw new Error(
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
 			"[transit] id_token audience is not a string or a list of strings",
-		);
+		]);
 	}
 	const audiences = Array.isArray(aud) ? aud : [aud];
 	if (!audiences.includes(expected.audience)) {
-		throw new Error(
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
 			"[transit] id_token was not issued for this client — check the audience",
-		);
+		]);
 	}
 	if (audiences.length > 1 && payload.azp !== expected.audience) {
 		// With several audiences the spec requires `azp`, and it has to name us:
 		// otherwise a token minted for a sibling client would pass the check
 		// above.
-		throw new Error(
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
 			"[transit] id_token has several audiences and no azp naming this client",
-		);
+		]);
 	}
 
 	const exp = payload.exp;
 	if (typeof exp !== "number") {
-		throw new Error("[transit] id_token carries no expiry");
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
+			"[transit] id_token carries no expiry",
+		]);
 	}
 	if (exp + leeway < now) {
-		throw new Error("[transit] id_token has expired");
+		throw new E_TRANSIT_INVALID_ID_TOKEN(["[transit] id_token has expired"]);
 	}
 
 	const iat = payload.iat;
 	if (typeof iat === "number" && iat - leeway > now) {
 		// A token issued in the future is either a clock problem or a forgery;
 		// neither should sign anybody in.
-		throw new Error("[transit] id_token is issued in the future");
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
+			"[transit] id_token is issued in the future",
+		]);
 	}
 
 	if (payload.nonce !== expected.nonce) {
 		// Without this, a token captured from an earlier sign-in of the same user
 		// at the same provider can be replayed into a fresh session.
-		throw new Error("[transit] id_token nonce does not match this sign-in");
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
+			"[transit] id_token nonce does not match this sign-in",
+		]);
 	}
 
 	// Built from the locals each check narrowed, not asserted over the bag it
@@ -249,10 +260,14 @@ function decodeSegment(segment: string, what: string): Record<string, unknown> {
 	try {
 		parsed = JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
 	} catch {
-		throw new Error(`[transit] id_token ${what} is not valid JSON`);
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
+			`[transit] id_token ${what} is not valid JSON`,
+		]);
 	}
 	if (!isRecord(parsed)) {
-		throw new Error(`[transit] id_token ${what} is not an object`);
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
+			`[transit] id_token ${what} is not an object`,
+		]);
 	}
 	return parsed;
 }
@@ -270,14 +285,14 @@ function decodeSegment(segment: string, what: string): Record<string, unknown> {
 function assertKeyMatchesAlg(jwk: Jwk, alg: SupportedAlg): void {
 	const spec = SUPPORTED[alg];
 	if (jwk.kty !== spec.kty) {
-		throw new Error(
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
 			`[transit] ${alg} needs a ${spec.kty} key, and the provider published a ${String(jwk.kty)} one`,
-		);
+		]);
 	}
 	const curve = "crv" in spec ? spec.crv : undefined;
 	if (curve !== undefined && jwk.crv !== curve) {
-		throw new Error(
+		throw new E_TRANSIT_INVALID_ID_TOKEN([
 			`[transit] ${alg} is defined over ${curve}, and the key is on ${String(jwk.crv)}`,
-		);
+		]);
 	}
 }

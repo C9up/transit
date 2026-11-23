@@ -222,7 +222,10 @@ describe("transit > apple > the flow", () => {
 		await driver.begin();
 
 		await expect(driver.userFromToken("at")).rejects.toThrow(
-			/publishes no userinfo endpoint/,
+			expect.objectContaining({
+				code: "E_TRANSIT_NO_USERINFO_ENDPOINT",
+				message: expect.stringMatching(/publishes no userinfo endpoint/),
+			}),
 		);
 	});
 });

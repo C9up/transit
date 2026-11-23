@@ -13,20 +13,16 @@
  */
 
 import { randomUUID } from "node:crypto";
-import {
-	LdapConnection,
-	type LdapEntry,
-	LdapError,
-	type LdapFilter,
-} from "../ldap.js";
+import { E_TRANSIT_LDAP_ERROR } from "../errors.js";
+import { LdapConnection, type LdapEntry, type LdapFilter } from "../ldap.js";
 import type { DirectoryDriver, TransitUser } from "../types.js";
 
 /**
  * The one refusal for a wrong password and an unknown login: which of the two
  * it was is not something a sign-in form should disclose.
  */
-function invalidCredentials(): LdapError {
-	return new LdapError(
+function invalidCredentials(): E_TRANSIT_LDAP_ERROR {
+	return new E_TRANSIT_LDAP_ERROR(
 		"the directory refused the bind: invalid credentials",
 		49,
 	);
@@ -78,12 +74,18 @@ export class LdapDirectory implements DirectoryDriver {
 		// password must not reach the directory, which would answer success to
 		// an anonymous bind.
 		if (password === "") {
-			throw new LdapError(
+			throw new E_TRANSIT_LDAP_ERROR(
 				"a password is required — an empty one is an anonymous bind, which the directory would accept",
+				undefined,
+				{
+					status: 400,
+				},
 			);
 		}
 		if (username === "") {
-			throw new LdapError("a username is required");
+			throw new E_TRANSIT_LDAP_ERROR("a username is required", undefined, {
+				status: 400,
+			});
 		}
 
 		const entry = await this.#find(username);
@@ -99,7 +101,7 @@ export class LdapDirectory implements DirectoryDriver {
 			await this.#bindAs(entry.dn, password);
 		} catch (error) {
 			// The refusal of a wrong password reads exactly like an unknown one.
-			if (error instanceof LdapError && error.code === 49) {
+			if (error instanceof E_TRANSIT_LDAP_ERROR && error.resultCode === 49) {
 				throw invalidCredentials();
 			}
 			throw error;
@@ -148,7 +150,7 @@ export class LdapDirectory implements DirectoryDriver {
 
 			const [entry, ...others] = entries;
 			if (others.length > 0) {
-				throw new LdapError(
+				throw new E_TRANSIT_LDAP_ERROR(
 					`'${username}' matches ${entries.length} entries, and this signs in one person`,
 				);
 			}

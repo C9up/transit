@@ -103,7 +103,12 @@ describe("transit > saml > who it is from and for", () => {
 	it("refuses an assertion from another issuer", () => {
 		expect(() =>
 			validate(assertionXml({ issuer: "https://evil.test" })),
-		).toThrow(/issued by 'https:\/\/evil.test'/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_SAML_REJECTED",
+				message: expect.stringMatching(/issued by 'https:\/\/evil.test'/),
+			}),
+		);
 	});
 
 	it("refuses an assertion addressed to another application", () => {

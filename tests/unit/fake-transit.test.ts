@@ -57,7 +57,7 @@ describe("transit > FakeTransit", () => {
 
 		await expect(
 			transit.callback("google", "code", "attacker", state, secret),
-		).rejects.toThrow(/state mismatch/);
+		).rejects.toThrow(/Unable to verify re-redirect state/);
 	});
 
 	it("refuses a callback that dropped the value begin() returned", async () => {
@@ -68,7 +68,12 @@ describe("transit > FakeTransit", () => {
 		// that stores only the state works with some providers and not others.
 		await expect(
 			transit.callback("google", "code", state, state),
-		).rejects.toThrow(/returned as `secret`/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_MISSING_SECRET",
+				message: expect.stringMatching(/returned as `secret`/),
+			}),
+		);
 	});
 
 	it("says what to call when nothing was declared", async () => {
@@ -77,7 +82,12 @@ describe("transit > FakeTransit", () => {
 
 		await expect(
 			transit.callback("google", "code", state, state, secret),
-		).rejects.toThrow(/willReturn\('google'/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_FAKE_NOT_DECLARED",
+				message: expect.stringMatching(/willReturn\('google'/),
+			}),
+		);
 	});
 
 	it("records what began and what completed", async () => {
@@ -90,7 +100,12 @@ describe("transit > FakeTransit", () => {
 		transit.assertBegan("github");
 		transit.assertSignedIn("google");
 		expect(() => transit.assertSignedIn("github")).toThrow(
-			/Expected a sign-in to complete through 'github'/,
+			expect.objectContaining({
+				code: "E_TRANSIT_FAKE_ASSERTION",
+				message: expect.stringMatching(
+					/Expected a sign-in to complete through 'github'/,
+				),
+			}),
 		);
 	});
 
@@ -177,11 +192,24 @@ describe("transit > FakeTransit > a directory", () => {
 		await expect(transit.authenticate("staff", "ada", "wrong")).rejects.toThrow(
 			/invalid credentials/,
 		);
+		// The code the real directory answers with: LDAP's invalidCredentials.
+		await expect(
+			transit.authenticate("staff", "ada", "wrong"),
+		).rejects.toMatchObject({
+			code: "E_TRANSIT_LDAP_ERROR",
+			resultCode: 49,
+			status: 400,
+		});
 	});
 
 	it("says what to call when nothing was declared", async () => {
 		await expect(
 			new FakeTransit().authenticate("staff", "ada", "x"),
-		).rejects.toThrow(/willReturn\('staff'/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_FAKE_NOT_DECLARED",
+				message: expect.stringMatching(/willReturn\('staff'/),
+			}),
+		);
 	});
 });

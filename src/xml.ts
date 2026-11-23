@@ -17,6 +17,8 @@
  * they appeared, because canonicalization needs both.
  */
 
+import { E_TRANSIT_INVALID_XML } from "./errors.js";
+
 /** The prefix bound by the XML specification itself; never declared. */
 export const XML_NS = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NS = "http://www.w3.org/2000/xmlns/";
@@ -67,14 +69,6 @@ export interface XmlInstruction {
 
 export type XmlNode = XmlElement | XmlText | XmlComment | XmlInstruction;
 
-class XmlError extends Error {
-	readonly code = "E_TRANSIT_INVALID_XML";
-	constructor(message: string) {
-		super(`[transit] ${message}`);
-		this.name = "XmlError";
-	}
-}
-
 /**
  * What a document is allowed to cost.
  *
@@ -108,9 +102,9 @@ export function parseXml(source: string, limits?: XmlLimits): XmlElement {
 	// Checked before the copy below, not after: normalising duplicates the whole
 	// string, so a 300 MB body cost 600 MB before anything looked at its size.
 	if (source.length > resolved.maxLength) {
-		throw new XmlError(
+		throw new E_TRANSIT_INVALID_XML([
 			`the document is ${source.length} characters, over the ${resolved.maxLength} allowed`,
-		);
+		]);
 	}
 	// Line endings are normalised before parsing, as the canonicalization
 	// specification requires — otherwise the same document signed on one
@@ -198,9 +192,9 @@ class Parser {
 	#node(): void {
 		this.#nodes += 1;
 		if (this.#nodes > this.limits.maxNodes) {
-			throw new XmlError(
+			throw new E_TRANSIT_INVALID_XML([
 				`the document has more than ${this.limits.maxNodes} nodes`,
-			);
+			]);
 		}
 	}
 
@@ -214,9 +208,9 @@ class Parser {
 				continue;
 			}
 			if (this.#peek("<!DOCTYPE") || this.#peek("<!ENTITY")) {
-				throw new XmlError(
+				throw new E_TRANSIT_INVALID_XML([
 					"the document carries a DOCTYPE, which this refuses: it is how external entities and expansion bombs get in.",
-				);
+				]);
 			}
 			if (this.#peek("<!--")) {
 				this.#skipTo("-->");
@@ -227,11 +221,14 @@ class Parser {
 				continue;
 			}
 			if (root !== undefined) {
-				throw new XmlError("the document has more than one root element");
+				throw new E_TRANSIT_INVALID_XML([
+					"the document has more than one root element",
+				]);
 			}
 			root = this.#element(undefined);
 		}
-		if (root === undefined) throw new XmlError("the document has no element");
+		if (root === undefined)
+			throw new E_TRANSIT_INVALID_XML(["the document has no element"]);
 		return root;
 	}
 
@@ -241,9 +238,9 @@ class Parser {
 		// ran — and the stack it overflows is the one holding the signature check
 		// that has not happened yet.
 		if (depth > this.limits.maxDepth) {
-			throw new XmlError(
+			throw new E_TRANSIT_INVALID_XML([
 				`the document nests deeper than ${this.limits.maxDepth}`,
-			);
+			]);
 		}
 		this.#node();
 		this.#expect("<");
@@ -272,9 +269,9 @@ class Parser {
 			this.#skipSpace();
 			raw.push({ qname: name, value: this.#attributeValue() });
 			if (raw.length > this.limits.maxAttributes) {
-				throw new XmlError(
+				throw new E_TRANSIT_INVALID_XML([
 					`element <${qname}> carries more than ${this.limits.maxAttributes} attributes`,
-				);
+				]);
 			}
 		}
 
@@ -283,7 +280,8 @@ class Parser {
 				element.namespaces.push({ prefix: "", uri: value });
 			} else if (name.startsWith("xmlns:")) {
 				const prefix = name.slice(6);
-				if (prefix === "") throw new XmlError("empty namespace prefix");
+				if (prefix === "")
+					throw new E_TRANSIT_INVALID_XML(["empty namespace prefix"]);
 				element.namespaces.push({ prefix, uri: value });
 			}
 		}
@@ -291,7 +289,9 @@ class Parser {
 			new Set(element.namespaces.map((n) => n.prefix)).size !==
 			element.namespaces.length
 		) {
-			throw new XmlError(`element <${qname}> declares a prefix twice`);
+			throw new E_TRANSIT_INVALID_XML([
+				`element <${qname}> declares a prefix twice`,
+			]);
 		}
 
 		const [prefix, local] = split(qname);
@@ -299,9 +299,9 @@ class Parser {
 		element.local = local;
 		const uri = resolvePrefix(element, prefix);
 		if (uri === undefined) {
-			throw new XmlError(
+			throw new E_TRANSIT_INVALID_XML([
 				`element <${qname}> uses the unbound prefix '${prefix}'`,
-			);
+			]);
 		}
 		element.namespaceUri = uri;
 
@@ -314,9 +314,9 @@ class Parser {
 			if (attrPrefix !== "") {
 				const resolved = resolvePrefix(element, attrPrefix);
 				if (resolved === undefined) {
-					throw new XmlError(
+					throw new E_TRANSIT_INVALID_XML([
 						`attribute '${name}' uses the unbound prefix '${attrPrefix}'`,
-					);
+					]);
 				}
 				attrUri = resolved;
 			}
@@ -332,7 +332,9 @@ class Parser {
 			new Set(element.attributes.map((a) => `${a.namespaceUri}|${a.local}`))
 				.size !== element.attributes.length
 		) {
-			throw new XmlError(`element <${qname}> carries the same attribute twice`);
+			throw new E_TRANSIT_INVALID_XML([
+				`element <${qname}> carries the same attribute twice`,
+			]);
 		}
 
 		if (this.#take("/>")) return element;
@@ -340,13 +342,15 @@ class Parser {
 
 		for (;;) {
 			if (this.#at >= this.source.length) {
-				throw new XmlError(`<${qname}> is never closed`);
+				throw new E_TRANSIT_INVALID_XML([`<${qname}> is never closed`]);
 			}
 			if (this.#peek("</")) {
 				this.#expect("</");
 				const closing = this.#name();
 				if (closing !== qname) {
-					throw new XmlError(`<${qname}> is closed by </${closing}>`);
+					throw new E_TRANSIT_INVALID_XML([
+						`<${qname}> is closed by </${closing}>`,
+					]);
 				}
 				this.#skipSpace();
 				this.#expect(">");
@@ -354,7 +358,8 @@ class Parser {
 			}
 			if (this.#peek("<!--")) {
 				const end = this.source.indexOf("-->", this.#at);
-				if (end === -1) throw new XmlError("a comment is never closed");
+				if (end === -1)
+					throw new E_TRANSIT_INVALID_XML(["a comment is never closed"]);
 				this.#node();
 				element.children.push({
 					type: "comment",
@@ -365,7 +370,8 @@ class Parser {
 			}
 			if (this.#peek("<![CDATA[")) {
 				const end = this.source.indexOf("]]>", this.#at);
-				if (end === -1) throw new XmlError("a CDATA section is never closed");
+				if (end === -1)
+					throw new E_TRANSIT_INVALID_XML(["a CDATA section is never closed"]);
 				this.#node();
 				element.children.push({
 					type: "text",
@@ -375,12 +381,16 @@ class Parser {
 				continue;
 			}
 			if (this.#peek("<!")) {
-				throw new XmlError("the document carries a declaration this refuses");
+				throw new E_TRANSIT_INVALID_XML([
+					"the document carries a declaration this refuses",
+				]);
 			}
 			if (this.#peek("<?")) {
 				const end = this.source.indexOf("?>", this.#at);
 				if (end === -1)
-					throw new XmlError("a processing instruction is never closed");
+					throw new E_TRANSIT_INVALID_XML([
+						"a processing instruction is never closed",
+					]);
 				const body = this.source.slice(this.#at + 2, end);
 				const space = body.search(/\s/);
 				this.#node();
@@ -410,15 +420,16 @@ class Parser {
 	#attributeValue(): string {
 		const quote = this.source[this.#at];
 		if (quote !== '"' && quote !== "'") {
-			throw new XmlError("an attribute value is not quoted");
+			throw new E_TRANSIT_INVALID_XML(["an attribute value is not quoted"]);
 		}
 		this.#at += 1;
 		const end = this.source.indexOf(quote, this.#at);
-		if (end === -1) throw new XmlError("an attribute value is never closed");
+		if (end === -1)
+			throw new E_TRANSIT_INVALID_XML(["an attribute value is never closed"]);
 		const raw = this.source.slice(this.#at, end);
 		this.#at = end + 1;
 		if (raw.includes("<")) {
-			throw new XmlError("an attribute value contains '<'");
+			throw new E_TRANSIT_INVALID_XML(["an attribute value contains '<'"]);
 		}
 		// Attribute-value normalisation, and the order matters: a LITERAL tab or
 		// newline becomes a space, while `&#x9;` stays a tab. Unescaping first
@@ -429,7 +440,10 @@ class Parser {
 
 	#name(): string {
 		const match = /^[A-Za-z_:][\w.\-:]*/.exec(this.source.slice(this.#at));
-		if (!match) throw new XmlError(`expected a name at offset ${this.#at}`);
+		if (!match)
+			throw new E_TRANSIT_INVALID_XML([
+				`expected a name at offset ${this.#at}`,
+			]);
 		this.#at += match[0].length;
 		return match[0];
 	}
@@ -445,7 +459,7 @@ class Parser {
 
 	#skipTo(marker: string): void {
 		const end = this.source.indexOf(marker, this.#at);
-		if (end === -1) throw new XmlError(`'${marker}' is missing`);
+		if (end === -1) throw new E_TRANSIT_INVALID_XML([`'${marker}' is missing`]);
 		this.#at = end + marker.length;
 	}
 
@@ -461,7 +475,9 @@ class Parser {
 
 	#expect(text: string): void {
 		if (!this.#take(text)) {
-			throw new XmlError(`expected '${text}' at offset ${this.#at}`);
+			throw new E_TRANSIT_INVALID_XML([
+				`expected '${text}' at offset ${this.#at}`,
+			]);
 		}
 	}
 }
@@ -489,7 +505,8 @@ const PREDEFINED_ENTITIES: Readonly<Record<string, string>> = {
  */
 function resolveEntities(text: string): string {
 	return text.replace(/&([^&;]*)(;?)/g, (whole, body: string, end: string) => {
-		if (end !== ";") throw new XmlError(`unterminated reference '${whole}'`);
+		if (end !== ";")
+			throw new E_TRANSIT_INVALID_XML([`unterminated reference '${whole}'`]);
 		const named = Object.hasOwn(PREDEFINED_ENTITIES, body)
 			? PREDEFINED_ENTITIES[body]
 			: undefined;
@@ -498,16 +515,20 @@ function resolveEntities(text: string): string {
 		const decimal = /^#([0-9]{1,10})$/.exec(body)?.[1];
 		if (hex === undefined && decimal === undefined) {
 			if (/^#[xX]?[0-9A-Fa-f]+$/.test(body)) {
-				throw new XmlError(`'${whole}' is not a character XML allows`);
+				throw new E_TRANSIT_INVALID_XML([
+					`'${whole}' is not a character XML allows`,
+				]);
 			}
-			throw new XmlError(`unknown entity '${whole}'`);
+			throw new E_TRANSIT_INVALID_XML([`unknown entity '${whole}'`]);
 		}
 		const codePoint =
 			hex !== undefined
 				? Number.parseInt(hex, 16)
 				: Number.parseInt(decimal ?? "", 10);
 		if (!isXmlChar(codePoint)) {
-			throw new XmlError(`'${whole}' is not a character XML allows`);
+			throw new E_TRANSIT_INVALID_XML([
+				`'${whole}' is not a character XML allows`,
+			]);
 		}
 		return String.fromCodePoint(codePoint);
 	});

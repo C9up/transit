@@ -37,6 +37,7 @@ import {
 	messageLength,
 	OCTET_STRING,
 } from "./ber.js";
+import { E_TRANSIT_LDAP_ERROR } from "./errors.js";
 
 const BIND_REQUEST = application(0);
 const BIND_RESPONSE = application(1);
@@ -45,15 +46,6 @@ const SEARCH_REQUEST = application(3);
 const SEARCH_ENTRY = application(4);
 const SEARCH_DONE = application(5);
 const SEARCH_REFERENCE = application(19);
-
-export class LdapError extends Error {
-	readonly code: number | undefined;
-	constructor(message: string, code?: number) {
-		super(`[transit] ${message}`);
-		this.name = "LdapError";
-		this.code = code;
-	}
-}
 
 /** A filter, as a shape. There is no filter string, on purpose. */
 export type LdapFilter =
@@ -114,7 +106,7 @@ export class LdapConnection {
 		const url = new URL(this.#options.url);
 		const secure = url.protocol === "ldaps:";
 		if (!secure && this.#options.allowInsecure !== true) {
-			throw new LdapError(
+			throw new E_TRANSIT_LDAP_ERROR(
 				`'${this.#options.url}' is not encrypted, and a simple bind sends the password as it was typed. Use ldaps://, or set allowInsecure when the link is already protected.`,
 			);
 		}
@@ -140,7 +132,7 @@ export class LdapConnection {
 					: connectTcp({ host, port });
 			} catch (error) {
 				reject(
-					new LdapError(
+					new E_TRANSIT_LDAP_ERROR(
 						`could not reach ${host}:${port} — ${error instanceof Error ? error.message : String(error)}`,
 					),
 				);
@@ -153,7 +145,7 @@ export class LdapConnection {
 			const connectTimer = setTimeout(() => {
 				socket.destroy();
 				reject(
-					new LdapError(
+					new E_TRANSIT_LDAP_ERROR(
 						`${host}:${port} did not answer within ${timeoutMs} ms`,
 					),
 				);
@@ -163,7 +155,9 @@ export class LdapConnection {
 				clearTimeout(connectTimer);
 				this.#failAll(error);
 				reject(
-					new LdapError(`could not reach ${host}:${port} — ${error.message}`),
+					new E_TRANSIT_LDAP_ERROR(
+						`could not reach ${host}:${port} — ${error.message}`,
+					),
 				);
 			};
 			socket.once("error", onError);
@@ -172,10 +166,14 @@ export class LdapConnection {
 				socket.setTimeout(timeoutMs);
 				socket.on("data", (chunk) => this.#receive(chunk));
 				socket.on("timeout", () =>
-					this.#failAll(new LdapError("the directory stopped answering")),
+					this.#failAll(
+						new E_TRANSIT_LDAP_ERROR("the directory stopped answering"),
+					),
 				);
 				socket.on("close", () =>
-					this.#failAll(new LdapError("the directory closed the connection")),
+					this.#failAll(
+						new E_TRANSIT_LDAP_ERROR("the directory closed the connection"),
+					),
 				);
 				this.#socket = socket;
 				resolve();
@@ -193,7 +191,7 @@ export class LdapConnection {
 	 */
 	async bind(dn: string, password: string): Promise<void> {
 		if (password === "") {
-			throw new LdapError(
+			throw new E_TRANSIT_LDAP_ERROR(
 				"an empty password is an anonymous bind, which the directory accepts — refused here instead",
 			);
 		}
@@ -206,7 +204,8 @@ export class LdapConnection {
 			BIND_REQUEST,
 		);
 		const [response] = await this.#exchange(body, [BIND_RESPONSE]);
-		if (!response) throw new LdapError("the directory sent no bind response");
+		if (!response)
+			throw new E_TRANSIT_LDAP_ERROR("the directory sent no bind response");
 		assertSuccess(response, "bind");
 	}
 
@@ -256,7 +255,7 @@ export class LdapConnection {
 			// changes nothing.
 		}
 		socket.destroy();
-		this.#failAll(new LdapError("the connection was closed"));
+		this.#failAll(new E_TRANSIT_LDAP_ERROR("the connection was closed"));
 	}
 
 	/** Send one request and collect the replies that carry its message id. */
@@ -266,7 +265,7 @@ export class LdapConnection {
 		until?: number,
 	): Promise<Buffer[]> {
 		const socket = this.#socket;
-		if (!socket) throw new LdapError("the connection is not open");
+		if (!socket) throw new E_TRANSIT_LDAP_ERROR("the connection is not open");
 		const id = this.#nextMessage++;
 
 		return new Promise<Buffer[]>((resolve, reject) => {
@@ -276,7 +275,9 @@ export class LdapConnection {
 				if (error) {
 					this.#pending.delete(id);
 					reject(
-						new LdapError(`the request could not be sent — ${error.message}`),
+						new E_TRANSIT_LDAP_ERROR(
+							`the request could not be sent — ${error.message}`,
+						),
 					);
 				}
 			});
@@ -300,7 +301,7 @@ export class LdapConnection {
 			// reading from, and closing it is what stops the flood.
 			this.#socket?.destroy();
 			this.#failAll(
-				new LdapError(
+				new E_TRANSIT_LDAP_ERROR(
 					`the directory sent more than ${MAX_MESSAGE_BYTES} bytes without completing a message`,
 				),
 			);
@@ -324,7 +325,7 @@ export class LdapConnection {
 			this.#socket?.destroy();
 			const reason = cause instanceof Error ? cause.message : String(cause);
 			this.#failAll(
-				new LdapError(
+				new E_TRANSIT_LDAP_ERROR(
 					`the directory sent a reply that cannot be read: ${reason}`,
 				),
 			);
@@ -431,8 +432,8 @@ function readEntry(value: Buffer): LdapEntry {
 	};
 }
 
-function unexpectedReply(tag: number): LdapError {
-	return new LdapError(
+function unexpectedReply(tag: number): E_TRANSIT_LDAP_ERROR {
+	return new E_TRANSIT_LDAP_ERROR(
 		`the directory answered with an unexpected reply (tag 0x${tag.toString(16)})`,
 	);
 }
@@ -441,14 +442,14 @@ function unexpectedReply(tag: number): LdapError {
 function assertSuccess(response: Buffer, what: string): void {
 	const [codeElement, , messageElement] = decodeSequence(response);
 	if (!codeElement)
-		throw new LdapError(`the ${what} response has no result code`);
+		throw new E_TRANSIT_LDAP_ERROR(`the ${what} response has no result code`);
 	const code = decodeInteger(codeElement.value);
 	if (code === 0) return;
 	const detail =
 		messageElement && messageElement.tag === OCTET_STRING
 			? decodeString(messageElement.value)
 			: "";
-	throw new LdapError(
+	throw new E_TRANSIT_LDAP_ERROR(
 		`the directory refused the ${what}: ${describe(code)}${detail ? ` — ${detail}` : ""}`,
 		code,
 	);

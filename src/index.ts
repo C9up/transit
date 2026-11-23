@@ -11,7 +11,6 @@ import "./augmentations.js";
 export {
 	type AuthorizeCustomizer,
 	AuthorizeRequest,
-	E_TRANSIT_PROTECTED_PARAMETER,
 } from "./AuthorizeRequest.js";
 export { type AppleKey, appleClientSecret, parseAppleUser } from "./apple.js";
 export { type CanonicalizeOptions, canonicalize } from "./c14n.js";
@@ -34,11 +33,11 @@ export { type SamlConfig, SamlDriver } from "./drivers/SamlDriver.js";
 export { SpotifyDriver } from "./drivers/SpotifyDriver.js";
 export { TwitterDriver } from "./drivers/TwitterDriver.js";
 export { TwitterXDriver } from "./drivers/TwitterXDriver.js";
+export * as errors from "./errors.js";
 export type { IdTokenClaims, Jwk, SupportedAlg } from "./jwt.js";
 export {
 	LdapConnection,
 	type LdapEntry,
-	LdapError,
 	type LdapFilter,
 	type LdapOptions,
 } from "./ldap.js";
@@ -58,7 +57,6 @@ export {
 	assertResponseSucceeded,
 	SAML_ASSERTION_NS,
 	SAML_PROTOCOL_NS,
-	SamlError,
 	type SamlExpectations,
 	type SamlIdentity,
 	validateAssertion,

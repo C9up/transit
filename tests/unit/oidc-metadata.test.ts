@@ -81,7 +81,10 @@ describe("transit > discovery", () => {
 		// The URL asked is not the authority that replied — which is exactly how
 		// a mix-up attack starts.
 		await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
-			/not 'https:\/\/id\.acme\.test'/,
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_DISCOVERY",
+				message: expect.stringMatching(/not 'https:\/\/id\.acme\.test'/),
+			}),
 		);
 	});
 
@@ -89,7 +92,12 @@ describe("transit > discovery", () => {
 		for (const body of [null, [metadata], "document"]) {
 			stubFetch({ body });
 			await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
-				/discovery document of .* is not a JSON object/,
+				expect.objectContaining({
+					code: "E_TRANSIT_INVALID_RESPONSE",
+					message: expect.stringMatching(
+						/discovery document of .* is not a JSON object/,
+					),
+				}),
 			);
 		}
 	});
@@ -118,7 +126,10 @@ describe("transit > discovery", () => {
 		stubFetch({ body: incomplete });
 
 		await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
-			/no token_endpoint/,
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_DISCOVERY",
+				message: expect.stringMatching(/no token_endpoint/),
+			}),
 		);
 	});
 
@@ -166,7 +177,10 @@ describe("transit > discovery", () => {
 		stubFetch({ ok: false, status: 503, body: {} });
 
 		await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
-			/discovery failed.*503/,
+			expect.objectContaining({
+				code: "E_TRANSIT_DISCOVERY_FAILED",
+				message: expect.stringMatching(/discovery failed.*503/),
+			}),
 		);
 	});
 });
@@ -204,7 +218,10 @@ describe("transit > signing keys", () => {
 		// A stream of tokens naming invented keys must not turn this application
 		// into a load generator against the provider.
 		await expect(cache.key(`${ISSUER}/jwks`, "invented")).rejects.toThrow(
-			/did not publish/,
+			expect.objectContaining({
+				code: "E_TRANSIT_UNKNOWN_SIGNING_KEY",
+				message: expect.stringMatching(/did not publish/),
+			}),
 		);
 		await expect(cache.key(`${ISSUER}/jwks`, "invented-2")).rejects.toThrow(
 			/did not publish/,
@@ -225,7 +242,12 @@ describe("transit > signing keys", () => {
 
 		await expect(
 			new JwksCache().key(`${ISSUER}/jwks`, undefined),
-		).rejects.toThrow(/did not publish/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_UNKNOWN_SIGNING_KEY",
+				message: expect.stringMatching(/did not publish/),
+			}),
+		);
 	});
 
 	it("skips keys published for encryption", async () => {
@@ -257,7 +279,10 @@ describe("transit > signing keys", () => {
 		stubFetch({ body: { nope: true } });
 
 		await expect(new JwksCache().key(`${ISSUER}/jwks`, "a")).rejects.toThrow(
-			/no `keys` array/,
+			expect.objectContaining({
+				code: "E_TRANSIT_JWKS_FAILED",
+				message: expect.stringMatching(/no `keys` array/),
+			}),
 		);
 	});
 });

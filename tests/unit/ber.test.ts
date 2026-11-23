@@ -7,7 +7,6 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-	BerError,
 	context,
 	decode,
 	decodeInteger,
@@ -21,6 +20,7 @@ import {
 	messageLength,
 	OCTET_STRING,
 } from "../../src/ber.js";
+import { E_TRANSIT_INVALID_BER } from "../../src/errors.js";
 
 describe("transit > ber > lengths", () => {
 	it("writes a short length in one byte", () => {
@@ -48,12 +48,17 @@ describe("transit > ber > lengths", () => {
 		// Accepting it would mean scanning for a terminator the other side
 		// chooses.
 		expect(() => decode(Buffer.from([0x30, 0x80, 0x00, 0x00]))).toThrow(
-			BerError,
+			E_TRANSIT_INVALID_BER,
 		);
 	});
 
 	it("refuses an element claiming more bytes than arrived", () => {
-		expect(() => decode(Buffer.from([0x04, 0x10, 0x01]))).toThrow(/claims 16/);
+		expect(() => decode(Buffer.from([0x04, 0x10, 0x01]))).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_BER",
+				message: expect.stringMatching(/claims 16/),
+			}),
+		);
 	});
 });
 

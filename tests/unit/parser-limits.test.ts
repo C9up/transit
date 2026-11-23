@@ -92,7 +92,7 @@ describe("transit > xml > character and entity references", () => {
 			"&#xFFFE;",
 		]) {
 			const parse = () => parseXml(`<a>${reference}</a>`);
-			// An XmlError, never a bare RangeError a caller cannot tell apart
+			// An E_TRANSIT_INVALID_XML, never a bare RangeError a caller cannot tell apart
 			// from a crash.
 			expect(parse, reference).toThrow(/not a character XML allows/);
 			expect(parse).toThrow(

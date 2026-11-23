@@ -9,6 +9,7 @@
  * `LinkedInOpenidConnectDriver`.
  */
 
+import { E_TRANSIT_NO_EMAIL } from "../errors.js";
 import { Oauth2Driver } from "../Oauth2Driver.js";
 import type { TransitUser } from "../types.js";
 
@@ -61,9 +62,7 @@ export class LinkedInDriver extends Oauth2Driver {
 			const address = Reflect.get(handle, "emailAddress");
 			if (typeof address === "string" && address !== "") return address;
 		}
-		throw new Error(
-			"LinkedIn returned no email address — the application needs the 'r_emailaddress' scope.",
-		);
+		throw new E_TRANSIT_NO_EMAIL();
 	}
 
 	protected mapUser(raw: Record<string, unknown>): TransitUser {

@@ -160,7 +160,12 @@ describe("transit > oidc > begin", () => {
 		for (const secret of ["", "no-separator", "."]) {
 			await expect(
 				driver.callback("code", started.state, started.state, secret),
-			).rejects.toThrow(/begin\(\) returned as `secret`/);
+			).rejects.toThrow(
+				expect.objectContaining({
+					code: "E_TRANSIT_MISSING_SECRET",
+					message: expect.stringMatching(/begin\(\) returned as `secret`/),
+				}),
+			);
 		}
 	});
 
@@ -175,7 +180,10 @@ describe("transit > oidc > begin", () => {
 
 	it("refuses to build a redirect offline", () => {
 		expect(() => new OidcDriver(config).redirectUrl()).toThrow(
-			/begin\(\) instead of redirect\(\)/,
+			expect.objectContaining({
+				code: "E_TRANSIT_USE_BEGIN",
+				message: expect.stringMatching(/begin\(\) instead of redirect\(\)/),
+			}),
 		);
 	});
 });
@@ -261,7 +269,12 @@ describe("transit > oidc > callback", () => {
 			claims: { iss: ISSUER },
 		});
 
-		await expect(result).rejects.toThrow(/issuer mismatch/);
+		await expect(result).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_ID_TOKEN",
+				message: expect.stringMatching(/issuer mismatch/),
+			}),
+		);
 	});
 
 	it("sends the PKCE verifier and the client credentials on the exchange", async () => {
@@ -299,13 +312,35 @@ describe("transit > oidc > callback", () => {
 		// `none` is not an algorithm at all.
 		for (const alg of ["HS256", "none"]) {
 			const { result } = await run({ header: { alg } });
-			await expect(result).rejects.toThrow(/does not verify/);
+			await expect(result).rejects.toThrow(
+				expect.objectContaining({
+					code: "E_TRANSIT_INVALID_ID_TOKEN",
+					message: expect.stringMatching(/does not verify/),
+				}),
+			);
 		}
+	});
+
+	it("refuses a provider that declares only shared-secret algorithms", async () => {
+		const { result } = await run({
+			metadata: {
+				...metadata,
+				id_token_signing_alg_values_supported: ["HS256"],
+			},
+		});
+		await expect(result).rejects.toMatchObject({
+			code: "E_TRANSIT_UNSUPPORTED_ALGORITHM",
+		});
 	});
 
 	it("refuses an algorithm the provider never declared", async () => {
 		const { result } = await run({ header: { alg: "ES256" } });
-		await expect(result).rejects.toThrow(/did not declare it signs with/);
+		await expect(result).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_ID_TOKEN",
+				message: expect.stringMatching(/did not declare it signs with/),
+			}),
+		);
 	});
 
 	it("cannot be talked into the wrong verification path", async () => {
@@ -321,7 +356,12 @@ describe("transit > oidc > callback", () => {
 		});
 		// Node ignores the EC options when handed an RSA key, so this would
 		// otherwise verify as RSA and report success for a path it never took.
-		await expect(result).rejects.toThrow(/needs a EC key/);
+		await expect(result).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_ID_TOKEN",
+				message: expect.stringMatching(/needs a EC key/),
+			}),
+		);
 	});
 
 	it("refuses a signature made by another key", async () => {
@@ -343,19 +383,34 @@ describe("transit > oidc > callback", () => {
 
 		await expect(
 			driver.callback("code", started.state, started.state, started.secret),
-		).rejects.toThrow(/signature does not verify/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_ID_TOKEN",
+				message: expect.stringMatching(/signature does not verify/),
+			}),
+		);
 	});
 
 	it("says which scope is missing when no id_token comes back", async () => {
 		const { result } = await run({ token: { access_token: "at" } });
-		await expect(result).rejects.toThrow(/'openid' scope/);
+		await expect(result).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_NO_ID_TOKEN",
+				message: expect.stringMatching(/'openid' scope/),
+			}),
+		);
 	});
 
 	it("refuses a userinfo response about a different person", async () => {
 		// A substituted access token would otherwise turn into a richer profile
 		// for the wrong user.
 		const { result } = await run({ userinfo: { sub: "someone-else" } });
-		await expect(result).rejects.toThrow(/different subject/);
+		await expect(result).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_USERINFO_MISMATCH",
+				message: expect.stringMatching(/different subject/),
+			}),
+		);
 	});
 
 	it("skips userinfo when the config says so", async () => {
@@ -382,7 +437,7 @@ describe("transit > oidc > callback", () => {
 
 		await expect(
 			driver.callback("code", "attacker", started.state, started.secret),
-		).rejects.toThrow(/state mismatch/);
+		).rejects.toThrow(/Unable to verify re-redirect state/);
 	});
 });
 

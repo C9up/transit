@@ -60,7 +60,12 @@ describe("transit > the quasar bridge", () => {
 
 		await expect(
 			quasarConnection("cache", ["set"], "the replay store", isObject),
-		).rejects.toThrow(/connection 'cache' is missing set/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INCOMPLETE_CONNECTION",
+				message: expect.stringMatching(/connection 'cache' is missing set/),
+			}),
+		);
 	});
 
 	it("hands over the named connection when it answers everything", async () => {
@@ -124,6 +129,11 @@ describe("transit > the quasar bridge", () => {
 		// The useful message names the package to install, not the module id.
 		await expect(
 			quasarConnection("main", ["set"], "the test", isObject),
-		).rejects.toThrow(/pnpm add @c9up\/quasar/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_QUASAR_MISSING",
+				message: expect.stringMatching(/pnpm add @c9up\/quasar/),
+			}),
+		);
 	});
 });

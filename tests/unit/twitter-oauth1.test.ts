@@ -109,15 +109,32 @@ describe("transit > Twitter (OAuth1) > begin", () => {
 		// X refuses a callback URL the application has not registered; without
 		// this the flow would fail three calls later, on something unrelated.
 		await expect(new TwitterDriver(config).begin()).rejects.toThrow(
-			/did not confirm the callback URL/,
+			expect.objectContaining({
+				code: "E_TRANSIT_CALLBACK_NOT_CONFIRMED",
+				message: expect.stringMatching(/did not confirm the callback URL/),
+			}),
 		);
+	});
+
+	it("says so when X answers without a request token", async () => {
+		stubFetch({
+			ok: true,
+			status: 200,
+			body: "oauth_callback_confirmed=true",
+		});
+		await expect(new TwitterDriver(config).begin()).rejects.toMatchObject({
+			code: "E_TRANSIT_NO_REQUEST_TOKEN",
+		});
 	});
 
 	it("refuses to build a redirect offline", () => {
 		// The URL carries a token only X can issue, so there is nothing useful
 		// to return here.
 		expect(() => new TwitterDriver(config).redirectUrl()).toThrow(
-			/begin\(\) instead of redirect\(\)/,
+			expect.objectContaining({
+				code: "E_TRANSIT_USE_BEGIN",
+				message: expect.stringMatching(/begin\(\) instead of redirect\(\)/),
+			}),
 		);
 	});
 });
@@ -127,13 +144,18 @@ describe("transit > Twitter (OAuth1) > callback", () => {
 		// OAuth1's CSRF check: the token coming back has to be ours.
 		await expect(
 			new TwitterDriver(config).callback("verifier", "other", "rt", "rts"),
-		).rejects.toThrow(/state mismatch/);
+		).rejects.toThrow(/Unable to verify re-redirect state/);
 	});
 
 	it("refuses to run without the request-token secret", async () => {
 		await expect(
 			new TwitterDriver(config).callback("verifier", "rt", "rt"),
-		).rejects.toThrow(/request-token secret/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_MISSING_SECRET",
+				message: expect.stringMatching(/request-token secret/),
+			}),
+		);
 	});
 
 	it("exchanges the verifier and reads the profile", async () => {
@@ -211,7 +233,10 @@ describe("transit > Twitter (OAuth1) > callback", () => {
 describe("transit > Twitter (OAuth1) > a token already held", () => {
 	it("needs the secret as well", async () => {
 		await expect(new TwitterDriver(config).userFromToken("at")).rejects.toThrow(
-			/token secret/,
+			expect.objectContaining({
+				code: "E_TRANSIT_MISSING_SECRET",
+				message: expect.stringMatching(/token secret/),
+			}),
 		);
 	});
 

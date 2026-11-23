@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GitHubDriver } from "../../src/drivers/GitHubDriver.js";
 import { GoogleDriver } from "../../src/drivers/GoogleDriver.js";
 import { TransitManager } from "../../src/TransitManager.js";
-import type { OAuthConfig } from "../../src/types.js";
+import type { OAuthConfig, TransitDriver } from "../../src/types.js";
 
 const config: OAuthConfig = {
 	clientId: "cid",
@@ -38,17 +38,46 @@ afterEach(() => {
 });
 
 describe("transit > TransitManager", () => {
-	it("use() throws for an unregistered driver and lists what is available", () => {
+	it("use() refuses an unregistered driver and names only the one asked for", () => {
 		const m = new TransitManager();
 		m.register("google", new GoogleDriver(config));
-		expect(() => m.use("github")).toThrow(/not registered.*google/);
+		// A 404 reaches the client: the message must not list the registered providers.
+		expect(() => m.use("github")).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_UNKNOWN_PROVIDER",
+				status: 404,
+				message: 'Unknown authentication provider "github"',
+			}),
+		);
+	});
+
+	it("refuses begin() and userFromToken() on a driver that has neither", async () => {
+		// A driver of the application's own may implement only the required
+		// surface; asking it for more says so instead of calling undefined.
+		const bare: TransitDriver = {
+			redirectUrl: () => "https://provider.test/authorize",
+			callback: async () => {
+				throw new Error("not reached");
+			},
+		};
+		const m = new TransitManager();
+		m.register("bare", bare);
+		await expect(m.begin("bare")).rejects.toMatchObject({
+			code: "E_TRANSIT_BEGIN_UNSUPPORTED",
+		});
+		await expect(m.userFromToken("bare", "at")).rejects.toMatchObject({
+			code: "E_TRANSIT_TOKEN_PROFILE_UNSUPPORTED",
+		});
 	});
 
 	it("callback() refuses to run without expectedState (CSRF requirement)", async () => {
 		const m = new TransitManager();
 		m.register("github", new GitHubDriver(config));
 		await expect(m.callback("github", "code", "s", undefined)).rejects.toThrow(
-			/requires expectedState/,
+			expect.objectContaining({
+				code: "E_TRANSIT_STATE_REQUIRED",
+				message: expect.stringMatching(/requires expectedState/),
+			}),
 		);
 	});
 
@@ -79,28 +108,43 @@ describe("transit > GitHubDriver", () => {
 	it("rejects a mismatched state (CSRF)", async () => {
 		await expect(
 			new GitHubDriver(config).callback("code", "evil", "expected"),
-		).rejects.toThrow(/state mismatch/);
+		).rejects.toThrow(/Unable to verify re-redirect state/);
 	});
 
 	it("throws when the token exchange returns a non-2xx", async () => {
 		stubFetch(res(false, 401, {}));
 		await expect(
 			new GitHubDriver(config).callback("code", "s", "s"),
-		).rejects.toThrow(/token exchange failed.*401/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_TOKEN_EXCHANGE_FAILED",
+				message: expect.stringMatching(/token exchange failed.*401/),
+			}),
+		);
 	});
 
 	it("throws when the token response carries no access_token", async () => {
 		stubFetch(res(true, 200, { scope: "read:user" }));
 		await expect(
 			new GitHubDriver(config).callback("code", "s", "s"),
-		).rejects.toThrow(/no access_token/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_NO_ACCESS_TOKEN",
+				message: expect.stringMatching(/no access_token/),
+			}),
+		);
 	});
 
 	it("throws when the user API fails", async () => {
 		stubFetch(res(true, 200, { access_token: "tok" }), res(false, 403, {}));
 		await expect(
 			new GitHubDriver(config).callback("code", "s", "s"),
-		).rejects.toThrow(/profile request failed.*403/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_PROFILE_REQUEST_FAILED",
+				message: expect.stringMatching(/profile request failed.*403/),
+			}),
+		);
 	});
 
 	it("maps the user and token on success (falls back login→name, id→string)", async () => {
@@ -130,7 +174,7 @@ describe("transit > GoogleDriver", () => {
 	it("rejects a mismatched state (CSRF)", async () => {
 		await expect(
 			new GoogleDriver(config).callback("code", "evil", "expected"),
-		).rejects.toThrow(/state mismatch/);
+		).rejects.toThrow(/Unable to verify re-redirect state/);
 	});
 
 	it("maps user + token (refreshToken, expiresIn) on success", async () => {

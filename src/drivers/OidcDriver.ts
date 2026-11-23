@@ -17,6 +17,17 @@ import {
 	type AuthorizeCustomizer,
 	customizeAuthorize,
 } from "../AuthorizeRequest.js";
+import {
+	E_TRANSIT_INVALID_ID_TOKEN,
+	E_TRANSIT_MISSING_SECRET,
+	E_TRANSIT_NO_ID_TOKEN,
+	E_TRANSIT_NO_USERINFO_ENDPOINT,
+	E_TRANSIT_PROFILE_REQUEST_FAILED,
+	E_TRANSIT_TOKEN_EXCHANGE_FAILED,
+	E_TRANSIT_UNSUPPORTED_ALGORITHM,
+	E_TRANSIT_USE_BEGIN,
+	E_TRANSIT_USERINFO_MISMATCH,
+} from "../errors.js";
 import { fetchWithTimeout } from "../httpTimeout.js";
 import { readJsonObject } from "../json.js";
 import {
@@ -40,7 +51,7 @@ import type {
 	TransitDriver,
 	TransitUser,
 } from "../types.js";
-import { assertOAuthState } from "../types.js";
+import { assertOAuthCode, assertOAuthState } from "../types.js";
 
 export interface OidcConfig {
 	/** The provider's issuer URL, exactly as it appears in its tokens. */
@@ -91,9 +102,9 @@ export class OidcDriver implements TransitDriver {
 	 * is nothing to build offline.
 	 */
 	redirectUrl(): string {
-		throw new Error(
+		throw new E_TRANSIT_USE_BEGIN([
 			"[transit] an OpenID Connect provider publishes its endpoints, so the redirect is fetched. Use begin() instead of redirect().",
-		);
+		]);
 	}
 
 	async begin(
@@ -145,6 +156,7 @@ export class OidcDriver implements TransitDriver {
 		expectedState?: string,
 		secret?: string,
 	): Promise<{ user: TransitUser; token: OAuthToken }> {
+		assertOAuthCode(code, "code");
 		assertOAuthState(state, expectedState);
 		const { verifier, nonce } = splitSecret(secret);
 
@@ -153,9 +165,7 @@ export class OidcDriver implements TransitDriver {
 
 		const idToken = tokens.id_token;
 		if (typeof idToken !== "string" || idToken === "") {
-			throw new Error(
-				"[transit] the provider returned no id_token — check that the 'openid' scope is granted",
-			);
+			throw new E_TRANSIT_NO_ID_TOKEN();
 		}
 		const claims = await this.#verifyIdToken(metadata, idToken, nonce);
 
@@ -180,9 +190,7 @@ export class OidcDriver implements TransitDriver {
 	async userFromToken(accessToken: string): Promise<TransitUser> {
 		const metadata = await this.#discovery.metadata();
 		if (!metadata.userinfo_endpoint) {
-			throw new Error(
-				`[transit] '${this.#config.issuer}' publishes no userinfo endpoint, so a profile cannot be read from a token alone.`,
-			);
+			throw new E_TRANSIT_NO_USERINFO_ENDPOINT([this.#config.issuer]);
 		}
 		return this.mapUser(
 			await this.#userinfo(metadata.userinfo_endpoint, accessToken),
@@ -230,9 +238,9 @@ export class OidcDriver implements TransitDriver {
 			body,
 		});
 		if (!response.ok) {
-			throw new Error(
+			throw new E_TRANSIT_TOKEN_EXCHANGE_FAILED([
 				`[transit] OpenID Connect token exchange failed (HTTP ${response.status})`,
-			);
+			]);
 		}
 		return readJsonObject(response, "the OpenID Connect token response");
 	}
@@ -254,7 +262,9 @@ export class OidcDriver implements TransitDriver {
 
 		const key = await this.#jwks.key(metadata.jwks_uri, kid);
 		if (!verifyJwsSignature(parts, key, alg)) {
-			throw new Error("[transit] id_token signature does not verify");
+			throw new E_TRANSIT_INVALID_ID_TOKEN([
+				"[transit] id_token signature does not verify",
+			]);
 		}
 
 		return assertIdTokenClaims(parts.payload, {
@@ -280,19 +290,20 @@ export class OidcDriver implements TransitDriver {
 		];
 		const allowed = declared.filter(isSupportedAlg);
 		if (allowed.length === 0) {
-			throw new Error(
-				`[transit] '${this.#config.issuer}' signs id_tokens only with algorithms Transit refuses (${declared.join(", ")}). Asymmetric signatures are required.`,
-			);
+			throw new E_TRANSIT_UNSUPPORTED_ALGORITHM([
+				this.#config.issuer,
+				declared.join(", "),
+			]);
 		}
 		if (!isSupportedAlg(headerAlg)) {
-			throw new Error(
+			throw new E_TRANSIT_INVALID_ID_TOKEN([
 				`[transit] id_token announces '${String(headerAlg)}', which Transit does not verify — only asymmetric signatures are accepted`,
-			);
+			]);
 		}
 		if (!allowed.includes(headerAlg)) {
-			throw new Error(
+			throw new E_TRANSIT_INVALID_ID_TOKEN([
 				`[transit] id_token announces '${headerAlg}', which '${this.#config.issuer}' did not declare it signs with`,
-			);
+			]);
 		}
 		// The header only ever SELECTS from the set computed above. It cannot
 		// introduce an algorithm, which is what keeps `none` and the
@@ -319,9 +330,7 @@ export class OidcDriver implements TransitDriver {
 		}
 		const info = await this.#userinfo(metadata.userinfo_endpoint, accessToken);
 		if (info.sub !== claims.sub) {
-			throw new Error(
-				"[transit] the userinfo response describes a different subject than the id_token",
-			);
+			throw new E_TRANSIT_USERINFO_MISMATCH();
 		}
 		return { ...claims, ...info };
 	}
@@ -337,9 +346,9 @@ export class OidcDriver implements TransitDriver {
 			},
 		});
 		if (!response.ok) {
-			throw new Error(
+			throw new E_TRANSIT_PROFILE_REQUEST_FAILED([
 				`[transit] OpenID Connect userinfo request failed (HTTP ${response.status})`,
-			);
+			]);
 		}
 		return readJsonObject(response, "the OpenID Connect userinfo response");
 	}
@@ -390,9 +399,9 @@ function splitSecret(secret: string | undefined): {
 	// separator, or a missing nonce, is a value that did not come from begin().
 	const nonce = secret === undefined ? "" : secret.slice(index + 1);
 	if (secret === undefined || index === -1 || nonce === "") {
-		throw new Error(
+		throw new E_TRANSIT_MISSING_SECRET([
 			"[transit] OpenID Connect needs the value begin() returned as `secret` — store it with the state and pass it back here.",
-		);
+		]);
 	}
 	return { verifier: secret.slice(0, index), nonce };
 }

@@ -137,7 +137,12 @@ describe("transit > dsig > wrapping", () => {
 
 		expect(() =>
 			verifyXmlSignature(parseXml(attacked), { certificates }),
-		).toThrow(/elements carry the id 'a-1'/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_SIGNATURE",
+				message: expect.stringMatching(/elements carry the id 'a-1'/),
+			}),
+		);
 	});
 
 	it("refuses a signature that references something it does not sit inside", () => {
@@ -284,7 +289,12 @@ describe("transit > dsig > tampering", () => {
 
 		expect(() =>
 			verifyXmlSignature(parseXml(tampered), { certificates }),
-		).toThrow(/does not verify/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_SIGNATURE",
+				message: expect.stringMatching(/does not verify/),
+			}),
+		);
 	});
 
 	it("refuses a document with no signature at all", () => {

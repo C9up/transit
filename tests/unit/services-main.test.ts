@@ -34,7 +34,10 @@ describe("transit > services/main", () => {
 		// Answering with an empty manager would fail on the first sign-in
 		// instead, far from the cause.
 		expect(() => transit.registeredDrivers).toThrow(
-			/accessed before initialization/,
+			expect.objectContaining({
+				code: "E_TRANSIT_NOT_BOOTED",
+				message: expect.stringMatching(/accessed before initialization/),
+			}),
 		);
 	});
 

@@ -13,6 +13,14 @@ import type {
 	AuthorizeCustomizer,
 	AuthorizeRequest,
 } from "./AuthorizeRequest.js";
+import {
+	E_TRANSIT_BEGIN_UNSUPPORTED,
+	E_TRANSIT_NOT_A_DIRECTORY,
+	E_TRANSIT_NOT_A_REDIRECT_PROVIDER,
+	E_TRANSIT_STATE_REQUIRED,
+	E_TRANSIT_TOKEN_PROFILE_UNSUPPORTED,
+	E_TRANSIT_UNKNOWN_PROVIDER,
+} from "./errors.js";
 import type {
 	DirectoryDriver,
 	OAuthToken,
@@ -30,9 +38,7 @@ export class TransitManager {
 	use(name: string): TransitDriver {
 		const entry = this.#entry(name);
 		if (isDirectory(entry)) {
-			throw new Error(
-				`[transit] '${name}' is a directory: it verifies credentials rather than redirecting. Use authenticate('${name}', …).`,
-			);
+			throw new E_TRANSIT_NOT_A_REDIRECT_PROVIDER([name, name]);
 		}
 		return entry;
 	}
@@ -41,9 +47,7 @@ export class TransitManager {
 	directory(name: string): DirectoryDriver {
 		const entry = this.#entry(name);
 		if (!isDirectory(entry)) {
-			throw new Error(
-				`[transit] '${name}' is a redirect provider, not a directory. Use begin('${name}').`,
-			);
+			throw new E_TRANSIT_NOT_A_DIRECTORY([name, name]);
 		}
 		return entry;
 	}
@@ -64,10 +68,7 @@ export class TransitManager {
 
 	#entry(name: string): TransitEntry {
 		const driver = this.#drivers.get(name);
-		if (!driver)
-			throw new Error(
-				`OAuth driver '${name}' not registered. Available: ${[...this.#drivers.keys()].join(", ")}`,
-			);
+		if (!driver) throw new E_TRANSIT_UNKNOWN_PROVIDER([name]);
 		return driver;
 	}
 
@@ -103,9 +104,7 @@ export class TransitManager {
 	): Promise<RedirectRequest> {
 		const driver = this.use(name);
 		if (typeof driver.begin !== "function") {
-			throw new Error(
-				`[transit] The '${name}' driver does not support begin(); use redirect().`,
-			);
+			throw new E_TRANSIT_BEGIN_UNSUPPORTED([name]);
 		}
 		return typeof stateOrCustomize === "function"
 			? driver.begin(undefined, stateOrCustomize)
@@ -141,10 +140,10 @@ export class TransitManager {
 		secret?: string,
 	): Promise<{ user: TransitUser; token: OAuthToken }> {
 		if (!expectedState) {
-			throw new Error(
+			throw new E_TRANSIT_STATE_REQUIRED([
 				`[transit] OAuth callback for '${name}' requires expectedState for CSRF protection. ` +
 					`Store the state from redirect() in the session and pass it here.`,
-			);
+			]);
 		}
 		return this.use(name).callback(code, state, expectedState, secret);
 	}
@@ -161,9 +160,7 @@ export class TransitManager {
 	): Promise<TransitUser> {
 		const driver = this.use(name);
 		if (typeof driver.userFromToken !== "function") {
-			throw new Error(
-				`[transit] The '${name}' driver cannot read a profile from an existing token.`,
-			);
+			throw new E_TRANSIT_TOKEN_PROFILE_UNSUPPORTED([name]);
 		}
 		return driver.userFromToken(accessToken, tokenSecret);
 	}

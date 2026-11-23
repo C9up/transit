@@ -12,19 +12,13 @@
  * and re-finding an element would throw it away.
  */
 
+import { E_TRANSIT_SAML_REJECTED } from "./errors.js";
 import { childrenNamed, textOf, walk, type XmlElement } from "./xml.js";
 
 export const SAML_PROTOCOL_NS = "urn:oasis:names:tc:SAML:2.0:protocol";
 export const SAML_ASSERTION_NS = "urn:oasis:names:tc:SAML:2.0:assertion";
 const STATUS_SUCCESS = "urn:oasis:names:tc:SAML:2.0:status:Success";
 const BEARER = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
-
-export class SamlError extends Error {
-	constructor(message: string) {
-		super(`[transit] ${message}`);
-		this.name = "SamlError";
-	}
-}
 
 /** What a validated assertion says about the person. */
 export interface SamlIdentity {
@@ -85,11 +79,11 @@ export function assertResponseSucceeded(response: XmlElement): void {
 	const message = status
 		? childrenNamed(status, SAML_PROTOCOL_NS, "StatusMessage")[0]
 		: undefined;
-	throw new SamlError(
+	throw new E_TRANSIT_SAML_REJECTED([
 		`the provider refused the sign-in: ${value ?? "no status"}${
 			message ? ` — ${textOf(message).trim()}` : ""
 		}`,
-	);
+	]);
 }
 
 /**
@@ -106,9 +100,9 @@ export function validateAssertion(
 		assertion.namespaceUri !== SAML_ASSERTION_NS ||
 		assertion.local !== "Assertion"
 	) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			`expected a signed <Assertion>, and the signature covers <${assertion.qname}>`,
-		);
+		]);
 	}
 
 	const skew = expected.clockSkewSeconds ?? 60;
@@ -117,14 +111,16 @@ export function validateAssertion(
 	const issuer = childrenNamed(assertion, SAML_ASSERTION_NS, "Issuer")[0];
 	const issuerValue = issuer ? textOf(issuer).trim() : undefined;
 	if (issuerValue !== expected.issuer) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			`the assertion is issued by '${issuerValue ?? "nobody"}', not by '${expected.issuer}'`,
-		);
+		]);
 	}
 
 	const assertionId = assertion.attributes.find((a) => a.local === "ID")?.value;
 	if (!assertionId) {
-		throw new SamlError("the assertion carries no id, so it cannot be tracked");
+		throw new E_TRANSIT_SAML_REJECTED([
+			"the assertion carries no id, so it cannot be tracked",
+		]);
 	}
 
 	const subject = one(assertion, "Subject");
@@ -136,9 +132,9 @@ export function validateAssertion(
 		(c) => c.attributes.find((a) => a.local === "Method")?.value === BEARER,
 	);
 	if (!confirmation) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			"the assertion has no bearer subject confirmation, which is the only method a browser sign-in uses",
-		);
+		]);
 	}
 	const data = childrenNamed(
 		confirmation,
@@ -146,16 +142,18 @@ export function validateAssertion(
 		"SubjectConfirmationData",
 	)[0];
 	if (!data) {
-		throw new SamlError("the bearer confirmation carries no data to check");
+		throw new E_TRANSIT_SAML_REJECTED([
+			"the bearer confirmation carries no data to check",
+		]);
 	}
 
 	const recipient = data.attributes.find((a) => a.local === "Recipient")?.value;
 	if (recipient !== expected.recipient) {
 		// A response addressed to another service provider is a genuine
 		// assertion pointed at the wrong door.
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			`the assertion was sent to '${recipient ?? "nowhere"}', and this application answers at '${expected.recipient}'`,
-		);
+		]);
 	}
 
 	const answered = data.attributes.find(
@@ -165,24 +163,26 @@ export function validateAssertion(
 		if (answered !== expected.inResponseTo) {
 			// Without this, an assertion obtained anywhere else can be posted
 			// here and accepted.
-			throw new SamlError(
+			throw new E_TRANSIT_SAML_REJECTED([
 				"the assertion answers a different request than the one this sign-in made",
-			);
+			]);
 		}
 	} else if (answered !== undefined) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			"the assertion answers a request this application did not make",
-		);
+		]);
 	}
 
 	const confirmationExpiry = epoch(
 		data.attributes.find((a) => a.local === "NotOnOrAfter")?.value,
 	);
 	if (confirmationExpiry === undefined) {
-		throw new SamlError("the bearer confirmation never expires, which it must");
+		throw new E_TRANSIT_SAML_REJECTED([
+			"the bearer confirmation never expires, which it must",
+		]);
 	}
 	if (now - skew >= confirmationExpiry) {
-		throw new SamlError("the assertion is no longer usable");
+		throw new E_TRANSIT_SAML_REJECTED(["the assertion is no longer usable"]);
 	}
 
 	const conditions = one(assertion, "Conditions");
@@ -193,13 +193,15 @@ export function validateAssertion(
 		conditions.attributes.find((a) => a.local === "NotOnOrAfter")?.value,
 	);
 	if (notBefore !== undefined && now + skew < notBefore) {
-		throw new SamlError("the assertion is not valid yet");
+		throw new E_TRANSIT_SAML_REJECTED(["the assertion is not valid yet"]);
 	}
 	if (notOnOrAfter === undefined) {
-		throw new SamlError("the assertion has no expiry, which it must");
+		throw new E_TRANSIT_SAML_REJECTED([
+			"the assertion has no expiry, which it must",
+		]);
 	}
 	if (now - skew >= notOnOrAfter) {
-		throw new SamlError("the assertion has expired");
+		throw new E_TRANSIT_SAML_REJECTED(["the assertion has expired"]);
 	}
 
 	const audiences = childrenNamed(
@@ -212,19 +214,19 @@ export function validateAssertion(
 		),
 	);
 	if (audiences.length === 0) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			"the assertion restricts no audience, so it does not say who it is for",
-		);
+		]);
 	}
 	if (!audiences.includes(expected.audience)) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			`the assertion is for ${audiences.map((a) => `'${a}'`).join(", ")}, and this application is '${expected.audience}'`,
-		);
+		]);
 	}
 
 	const nameIdElement = childrenNamed(subject, SAML_ASSERTION_NS, "NameID")[0];
 	if (!nameIdElement) {
-		throw new SamlError("the assertion names nobody");
+		throw new E_TRANSIT_SAML_REJECTED(["the assertion names nobody"]);
 	}
 
 	const authn = childrenNamed(
@@ -294,9 +296,9 @@ export function assertionInside(signed: XmlElement): XmlElement {
 	);
 	const [assertion, ...others] = assertions;
 	if (assertion === undefined || others.length > 0) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			`the signed element contains ${assertions.length} assertions, and this reads one`,
-		);
+		]);
 	}
 	return assertion;
 }
@@ -305,9 +307,9 @@ function one(parent: XmlElement, local: string): XmlElement {
 	const found = childrenNamed(parent, SAML_ASSERTION_NS, local);
 	const [element, ...others] = found;
 	if (element === undefined || others.length > 0) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			`expected one <${local}> in the assertion, and there are ${found.length}`,
-		);
+		]);
 	}
 	return element;
 }

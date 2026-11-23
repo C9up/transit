@@ -145,7 +145,12 @@ describe("transit > jwt > claims", () => {
 	it("refuses a token from another issuer", () => {
 		expect(() =>
 			assertIdTokenClaims({ ...claims, iss: "https://evil.test" }, expected),
-		).toThrow(/issuer mismatch/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_ID_TOKEN",
+				message: expect.stringMatching(/issuer mismatch/),
+			}),
+		);
 	});
 
 	it("refuses a token minted for another client of the same issuer", () => {
@@ -203,14 +208,24 @@ describe("transit > jwt > claims", () => {
 
 describe("transit > jwt > decoding", () => {
 	it("refuses anything that is not three segments", () => {
-		expect(() => decodeJws("a.b")).toThrow(/three segments/);
+		expect(() => decodeJws("a.b")).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_ID_TOKEN",
+				message: expect.stringMatching(/three segments/),
+			}),
+		);
 		expect(() => decodeJws("a.b.c.d")).toThrow(/three segments/);
 	});
 
 	it("refuses a header or payload that is not a JSON object", () => {
 		expect(() =>
 			decodeJws(`${Buffer.from("[]").toString("base64url")}.${b64({})}.x`),
-		).toThrow(/header is not an object/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_ID_TOKEN",
+				message: expect.stringMatching(/header is not an object/),
+			}),
+		);
 		expect(() => decodeJws(`${b64({})}.bm90LWpzb24.x`)).toThrow(
 			/payload is not valid JSON/,
 		);
@@ -226,7 +241,10 @@ describe("transit > jwt > the key has to match the algorithm", () => {
 		// would otherwise verify as RSA and report success for a path it never
 		// took.
 		expect(() => verifyJwsSignature(parts, keys.jwk, "ES256")).toThrow(
-			/needs a EC key/,
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_ID_TOKEN",
+				message: expect.stringMatching(/needs a EC key/),
+			}),
 		);
 	});
 

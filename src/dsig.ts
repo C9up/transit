@@ -40,6 +40,7 @@ import {
 	X509Certificate,
 } from "node:crypto";
 import { canonicalize } from "./c14n.js";
+import { E_TRANSIT_INVALID_SIGNATURE } from "./errors.js";
 import {
 	childrenNamed,
 	textOf,
@@ -89,13 +90,6 @@ const SIGNATURES: Record<string, { hash: string; kind: "rsa" | "ec" }> = {
 	},
 };
 
-export class SignatureError extends Error {
-	constructor(message: string) {
-		super(`[transit] ${message}`);
-		this.name = "SignatureError";
-	}
-}
-
 export interface VerifyOptions {
 	/**
 	 * The provider's signing certificates, from its metadata — PEM, or the
@@ -121,7 +115,9 @@ export function verifyXmlSignature(
 	);
 	const [first, ...otherSignatures] = signatures;
 	if (first === undefined) {
-		throw new SignatureError("the document carries no signature");
+		throw new E_TRANSIT_INVALID_SIGNATURE([
+			"the document carries no signature",
+		]);
 	}
 	let signature = first;
 	if (otherSignatures.length > 0) {
@@ -135,9 +131,9 @@ export function verifyXmlSignature(
 		const onRoot = signatures.filter((element) => element.parent === root);
 		const [rootSignature, ...otherRootSignatures] = onRoot;
 		if (rootSignature === undefined || otherRootSignatures.length > 0) {
-			throw new SignatureError(
+			throw new E_TRANSIT_INVALID_SIGNATURE([
 				`the document carries ${signatures.length} signatures and ${onRoot.length} of them on the root element, and this verifies one signature, or one on the root over the whole document`,
-			);
+			]);
 		}
 		signature = rootSignature;
 	}
@@ -148,9 +144,9 @@ export function verifyXmlSignature(
 	)?.value;
 	const spec = method === undefined ? undefined : SIGNATURES[method];
 	if (spec === undefined) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`the signature uses '${method ?? "no algorithm"}', which this refuses. SHA-1 and the symmetric methods are not accepted.`,
-		);
+		]);
 	}
 
 	const canonicalizationMethod = only(
@@ -161,9 +157,9 @@ export function verifyXmlSignature(
 		canonicalizationMethod !== EXC_C14N &&
 		canonicalizationMethod !== EXC_C14N_COMMENTS
 	) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`SignedInfo is canonicalized with '${canonicalizationMethod ?? "nothing"}', and this verifies exclusive canonicalization`,
-		);
+		]);
 	}
 
 	// The signature is over SignedInfo, canonicalized. Everything the reference
@@ -190,7 +186,7 @@ export function verifyXmlSignature(
 		),
 	);
 	if (!holds) {
-		throw new SignatureError("the signature does not verify");
+		throw new E_TRANSIT_INVALID_SIGNATURE(["the signature does not verify"]);
 	}
 
 	const signed = verifyReference(root, signature, signedInfo);
@@ -198,9 +194,9 @@ export function verifyXmlSignature(
 		// Enveloped in the root and contained by what it signs, the reference
 		// can only be the root; said out loud, since the inner signatures are
 		// trusted only because this one covers them.
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			"the root's signature does not cover the root, and the document carries other signatures",
-		);
+		]);
 	}
 	return signed;
 }
@@ -220,16 +216,16 @@ function verifyReference(
 	const references = childrenNamed(signedInfo, DSIG_NS, "Reference");
 	const [reference, ...otherReferences] = references;
 	if (reference === undefined || otherReferences.length > 0) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`SignedInfo carries ${references.length} references, and this verifies one`,
-		);
+		]);
 	}
 
 	const uri = reference.attributes.find((a) => a.local === "URI")?.value;
 	if (uri === undefined || !uri.startsWith("#") || uri.length < 2) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`the reference points at '${uri ?? "nothing"}', and this verifies a same-document '#id' reference`,
-		);
+		]);
 	}
 	const id = uri.slice(1);
 
@@ -240,23 +236,23 @@ function verifyReference(
 	);
 	const [signed, ...otherMatches] = matches;
 	if (signed === undefined) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`the reference names '${id}', which is not in the document`,
-		);
+		]);
 	}
 	if (otherMatches.length > 0) {
 		// A second element carrying the signed element's ID is the classic
 		// wrapping payload: the signature stays valid, and a reader that looks
 		// the ID up finds the attacker's copy.
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`${matches.length} elements carry the id '${id}', which is how a signature gets pointed at the wrong one`,
-		);
+		]);
 	}
 
 	if (!contains(signed, signature)) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			"the signature sits outside the element it references, which this refuses to reason about",
-		);
+		]);
 	}
 
 	const { inclusivePrefixes, withComments } = readTransforms(
@@ -269,9 +265,9 @@ function verifyReference(
 	)?.value;
 	const hash = digestMethod === undefined ? undefined : DIGESTS[digestMethod];
 	if (hash === undefined) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`the digest uses '${digestMethod ?? "no algorithm"}', which this refuses. SHA-1 is not accepted.`,
-		);
+		]);
 	}
 
 	// The enveloped-signature transform: the element cannot carry a digest of
@@ -286,9 +282,9 @@ function verifyReference(
 
 	const expected = textOf(only(reference, "DigestValue")).replace(/\s+/g, "");
 	if (digest !== expected) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			"the signed element does not match its digest — it was changed after signing",
-		);
+		]);
 	}
 
 	return signed;
@@ -329,17 +325,17 @@ function readTransforms(
 		}
 		// XPath and XSLT can make the digest cover something other than the
 		// element, and one of them is executable.
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`the reference asks for the transform '${algorithm ?? "(none)"}', which this refuses`,
-		);
+		]);
 	}
 
 	if (!sawEnveloped && contains(signature.parent ?? signature, signature)) {
 		// A signature inside the element it signs has to be excluded from the
 		// digest, and the transform is how that is declared.
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			"the signature is inside the element it signs and does not declare the enveloped-signature transform",
-		);
+		]);
 	}
 	return { inclusivePrefixes, withComments };
 }
@@ -363,18 +359,18 @@ function resolveKeys(
 	certificates: string[],
 ): KeyObject[] {
 	if (certificates.length === 0) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			"no certificate was supplied — the key has to come from the provider's metadata, never from the document itself",
-		);
+		]);
 	}
 	const known = certificates.map(toCertificate);
 	const embedded = embeddedCertificate(signature);
 	if (embedded !== undefined) {
 		const match = known.find((cert) => cert.raw.equals(embedded.raw));
 		if (!match) {
-			throw new SignatureError(
+			throw new E_TRANSIT_INVALID_SIGNATURE([
 				"the document is signed with a certificate the provider's metadata does not list",
-			);
+			]);
 		}
 		return [match.publicKey];
 	}
@@ -403,7 +399,7 @@ function toCertificate(value: string): X509Certificate {
 	try {
 		return new X509Certificate(pem);
 	} catch {
-		throw new SignatureError("a certificate could not be read");
+		throw new E_TRANSIT_INVALID_SIGNATURE(["a certificate could not be read"]);
 	}
 }
 
@@ -412,9 +408,9 @@ function only(parent: XmlElement, local: string): XmlElement {
 	const found = childrenNamed(parent, DSIG_NS, local);
 	const [element, ...others] = found;
 	if (element === undefined || others.length > 0) {
-		throw new SignatureError(
+		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`expected one <${local}> under <${parent.local}>, and there are ${found.length}`,
-		);
+		]);
 	}
 	return element;
 }

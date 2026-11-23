@@ -6,6 +6,7 @@
  * with no providers fails on the first sign-in instead of at startup.
  */
 
+import { E_TRANSIT_NOT_BOOTED } from "../errors.js";
 import { TransitManager } from "../TransitManager.js";
 
 let instance: TransitManager | undefined;
@@ -34,9 +35,7 @@ export function clearTransit(): void {
 
 function resolve(): TransitManager {
 	if (!instance) {
-		throw new Error(
-			"[transit] accessed before initialization — register TransitProvider, or call setTransit() yourself.",
-		);
+		throw new E_TRANSIT_NOT_BOOTED();
 	}
 	return instance;
 }

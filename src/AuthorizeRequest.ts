@@ -21,19 +21,7 @@
  *   set). Scopes go through the scope methods, not `param('scope', …)`.
  */
 
-/** A parameter a callback tried to set that the flow owns. */
-export class E_TRANSIT_PROTECTED_PARAMETER extends Error {
-	readonly code = "E_TRANSIT_PROTECTED_PARAMETER";
-	readonly parameter: string;
-
-	constructor(parameter: string, hint: string) {
-		super(
-			`[transit] the authorize parameter '${parameter}' cannot be changed per request: ${hint}.`,
-		);
-		this.name = "E_TRANSIT_PROTECTED_PARAMETER";
-		this.parameter = parameter;
-	}
-}
+import { E_TRANSIT_PROTECTED_PARAMETER } from "./errors.js";
 
 /** Adjusts one redirect. */
 export type AuthorizeCustomizer = (request: AuthorizeRequest) => void;

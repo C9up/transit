@@ -110,7 +110,10 @@ describe("transit > social drivers > PKCE", () => {
 	it("refuses to send a user to X without a code verifier", () => {
 		// The provider would reject the URL; failing here says why.
 		expect(() => new TwitterXDriver(config).redirectUrl("st8")).toThrow(
-			/requires PKCE/,
+			expect.objectContaining({
+				code: "E_TRANSIT_PKCE_REQUIRED",
+				message: expect.stringMatching(/requires PKCE/),
+			}),
 		);
 	});
 
@@ -132,7 +135,12 @@ describe("transit > social drivers > PKCE", () => {
 	it("refuses the callback without the verifier it was redirected with", async () => {
 		await expect(
 			new TwitterXDriver(config).callback("code", "s", "s"),
-		).rejects.toThrow(/requires PKCE/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_PKCE_REQUIRED",
+				message: expect.stringMatching(/requires PKCE/),
+			}),
+		);
 	});
 
 	it("sends the verifier on the token exchange", async () => {
@@ -316,7 +324,12 @@ describe("transit > social drivers > reading the profile", () => {
 		// is a different problem from "the app was never granted the scope".
 		await expect(
 			new LinkedInDriver(config).callback("code", "s", "s"),
-		).rejects.toThrow(/r_emailaddress/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_NO_EMAIL",
+				message: expect.stringMatching(/r_emailaddress/),
+			}),
+		);
 	});
 
 	it("takes the first Spotify image as the avatar", async () => {

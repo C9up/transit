@@ -9,6 +9,12 @@
  * middle is a rate limit.
  */
 
+import {
+	E_TRANSIT_DISCOVERY_FAILED,
+	E_TRANSIT_INVALID_DISCOVERY,
+	E_TRANSIT_JWKS_FAILED,
+	E_TRANSIT_UNKNOWN_SIGNING_KEY,
+} from "./errors.js";
 import { fetchWithTimeout } from "./httpTimeout.js";
 import { readJsonObject } from "./json.js";
 import type { Jwk } from "./jwt.js";
@@ -88,9 +94,7 @@ export class OidcDiscovery {
 			headers: { Accept: "application/json" },
 		});
 		if (!response.ok) {
-			throw new Error(
-				`[transit] OpenID Connect discovery failed for '${this.#issuer}' (HTTP ${response.status})`,
-			);
+			throw new E_TRANSIT_DISCOVERY_FAILED([this.#issuer, response.status]);
 		}
 		const body = await readJsonObject(
 			response,
@@ -133,17 +137,13 @@ export class JwksCache {
 			this.#keys.length > 0 &&
 			this.#now() - this.#fetchedAt < this.#minRefetchMs
 		) {
-			throw new Error(
-				`[transit] id_token names a signing key ('${kid ?? "no kid"}') the provider did not publish`,
-			);
+			throw new E_TRANSIT_UNKNOWN_SIGNING_KEY([kid ?? "no kid"]);
 		}
 
 		await this.#fetchKeys(uri);
 		const refreshed = this.#find(kid);
 		if (!refreshed) {
-			throw new Error(
-				`[transit] id_token names a signing key ('${kid ?? "no kid"}') the provider did not publish`,
-			);
+			throw new E_TRANSIT_UNKNOWN_SIGNING_KEY([kid ?? "no kid"]);
 		}
 		return refreshed;
 	}
@@ -169,13 +169,15 @@ export class JwksCache {
 			headers: { Accept: "application/json" },
 		});
 		if (!response.ok) {
-			throw new Error(
+			throw new E_TRANSIT_JWKS_FAILED([
 				`[transit] fetching the provider's signing keys failed (HTTP ${response.status})`,
-			);
+			]);
 		}
 		const { keys } = await readJsonObject(response, "the provider's JWKS");
 		if (!Array.isArray(keys)) {
-			throw new Error("[transit] the provider's JWKS has no `keys` array");
+			throw new E_TRANSIT_JWKS_FAILED([
+				"[transit] the provider's JWKS has no `keys` array",
+			]);
 		}
 		this.#keys = keys.filter(isJwk);
 		this.#fetchedAt = this.#now();
@@ -198,9 +200,9 @@ function assertMetadata(
 	const required = (field: string): string => {
 		const value = body[field];
 		if (typeof value !== "string" || value === "") {
-			throw new Error(
+			throw new E_TRANSIT_INVALID_DISCOVERY([
 				`[transit] the discovery document of '${expectedIssuer}' has no ${field}`,
-			);
+			]);
 		}
 		return value;
 	};
@@ -209,9 +211,9 @@ function assertMetadata(
 	const tokenEndpoint = required("token_endpoint");
 	const jwksUri = required("jwks_uri");
 	if (issuer !== expectedIssuer) {
-		throw new Error(
+		throw new E_TRANSIT_INVALID_DISCOVERY([
 			`[transit] discovery answered for issuer '${issuer}', not '${expectedIssuer}' — the URL asked is not the authority that replied`,
-		);
+		]);
 	}
 	const userinfo = body.userinfo_endpoint;
 	const algs = stringList(body.id_token_signing_alg_values_supported);

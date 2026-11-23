@@ -109,8 +109,13 @@ describe("transit > provider", () => {
 		const manager = registry.get(TransitManager)?.() as TransitManager;
 
 		expect(manager.registeredDrivers).toEqual([]);
-		// Asking for a provider that was never declared names what exists.
-		expect(() => manager.use("google")).toThrow(/not registered/);
+		// Asking for a provider that was never declared is refused by its code.
+		expect(() => manager.use("google")).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_UNKNOWN_PROVIDER",
+				message: expect.stringMatching(/Unknown authentication provider/),
+			}),
+		);
 	});
 
 	it("builds the driver each helper names", () => {

@@ -9,6 +9,10 @@
  * fixing one list here.
  */
 
+import {
+	E_TRANSIT_INCOMPLETE_CONNECTION,
+	E_TRANSIT_QUASAR_MISSING,
+} from "./errors.js";
 import { quasarConnection as loadQuasarConnection } from "./vendor/quasarConnection.js";
 
 /**
@@ -29,6 +33,9 @@ export async function quasarConnection<T>(
 		required,
 		what,
 		isConnection,
-		raise: (_reason, message, cause) => new Error(message, { cause }),
+		raise: (reason, message, cause) =>
+			reason === "quasar-missing"
+				? new E_TRANSIT_QUASAR_MISSING([message], { cause })
+				: new E_TRANSIT_INCOMPLETE_CONNECTION([message], { cause }),
 	});
 }

@@ -18,6 +18,12 @@ import {
 	type AuthorizeCustomizer,
 	customizeAuthorize,
 } from "./AuthorizeRequest.js";
+import {
+	E_TRANSIT_NO_ACCESS_TOKEN,
+	E_TRANSIT_PKCE_REQUIRED,
+	E_TRANSIT_PROFILE_REQUEST_FAILED,
+	E_TRANSIT_TOKEN_EXCHANGE_FAILED,
+} from "./errors.js";
 import { fetchWithTimeout } from "./httpTimeout.js";
 import { isRecord, readJsonObject } from "./json.js";
 import type {
@@ -27,7 +33,7 @@ import type {
 	TransitDriver,
 	TransitUser,
 } from "./types.js";
-import { assertOAuthState } from "./types.js";
+import { assertOAuthCode, assertOAuthState } from "./types.js";
 
 /** A provider's token response, before it is narrowed. */
 type TokenResponse = Record<string, unknown>;
@@ -110,9 +116,9 @@ export abstract class Oauth2Driver implements TransitDriver {
 
 		if (this.requiresPkce) {
 			if (!secret) {
-				throw new Error(
+				throw new E_TRANSIT_PKCE_REQUIRED([
 					`[transit] ${this.provider} requires PKCE: pass the code verifier from createCodeVerifier() to redirectUrl(), store it with the state, and hand it back to callback().`,
-				);
+				]);
 			}
 			params.set("code_challenge", challengeFor(secret));
 			params.set("code_challenge_method", "S256");
@@ -144,11 +150,12 @@ export abstract class Oauth2Driver implements TransitDriver {
 		expectedState?: string,
 		secret?: string,
 	): Promise<{ user: TransitUser; token: OAuthToken }> {
+		assertOAuthCode(code, "code");
 		assertOAuthState(state, expectedState);
 		if (this.requiresPkce && !secret) {
-			throw new Error(
+			throw new E_TRANSIT_PKCE_REQUIRED([
 				`[transit] ${this.provider} requires PKCE: pass back the code verifier you stored at redirect time.`,
-			);
+			]);
 		}
 		const tokens = await this.exchange(code, secret);
 		const accessToken = String(tokens.access_token);
@@ -199,16 +206,18 @@ export abstract class Oauth2Driver implements TransitDriver {
 			body,
 		});
 		if (!response.ok) {
-			throw new Error(
+			throw new E_TRANSIT_TOKEN_EXCHANGE_FAILED([
 				`${this.provider} OAuth token exchange failed (HTTP ${response.status})`,
-			);
+			]);
 		}
 		const tokens = await readJsonObject(
 			response,
 			`${this.provider} OAuth token response`,
 		);
 		if (!tokens.access_token) {
-			throw new Error(`${this.provider} OAuth: no access_token in response`);
+			throw new E_TRANSIT_NO_ACCESS_TOKEN([
+				`${this.provider} OAuth: no access_token in response`,
+			]);
 		}
 		return tokens;
 	}
@@ -255,9 +264,9 @@ export abstract class Oauth2Driver implements TransitDriver {
 			},
 		});
 		if (!response.ok) {
-			throw new Error(
+			throw new E_TRANSIT_PROFILE_REQUEST_FAILED([
 				`${this.provider} profile request failed (HTTP ${response.status})`,
-			);
+			]);
 		}
 		return await response.json();
 	}

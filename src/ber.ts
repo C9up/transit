@@ -8,6 +8,8 @@
  * become syntax. LDAP injection is not escaped away here; it is unrepresentable.
  */
 
+import { E_TRANSIT_INVALID_BER } from "./errors.js";
+
 /** Universal tags, and the two LDAP builds everything else from. */
 export const BOOLEAN = 0x01;
 export const INTEGER = 0x02;
@@ -24,13 +26,6 @@ export const context = (n: number): number => 0xa0 | n;
 /** `[n]` context-specific, primitive. */
 export const contextPrimitive = (n: number): number => 0x80 | n;
 
-export class BerError extends Error {
-	constructor(message: string) {
-		super(`[transit] ${message}`);
-		this.name = "BerError";
-	}
-}
-
 /** One tag-length-value element. */
 export function encode(tag: number, value: Buffer): Buffer {
 	return Buffer.concat([Buffer.from([tag]), encodeLength(value.length), value]);
@@ -38,7 +33,7 @@ export function encode(tag: number, value: Buffer): Buffer {
 
 export function encodeInteger(value: number, tag = INTEGER): Buffer {
 	if (!Number.isSafeInteger(value)) {
-		throw new BerError(`cannot encode ${value} as an integer`);
+		throw new E_TRANSIT_INVALID_BER([`cannot encode ${value} as an integer`]);
 	}
 	const bytes: number[] = [];
 	let remaining = value;
@@ -78,15 +73,17 @@ export interface BerElement {
 /** Read one element at `offset`. */
 export function decode(buffer: Buffer, offset = 0): BerElement {
 	if (offset >= buffer.length) {
-		throw new BerError("the message ends where an element was expected");
+		throw new E_TRANSIT_INVALID_BER([
+			"the message ends where an element was expected",
+		]);
 	}
 	const tag = buffer.readUInt8(offset);
 	const { length, at } = decodeLength(buffer, offset + 1);
 	const end = at + length;
 	if (end > buffer.length) {
-		throw new BerError(
+		throw new E_TRANSIT_INVALID_BER([
 			`an element claims ${length} bytes and the message holds ${buffer.length - at}`,
-		);
+		]);
 	}
 	return { tag, value: buffer.subarray(at, end), end };
 }
@@ -104,10 +101,13 @@ export function decodeSequence(value: Buffer): BerElement[] {
 }
 
 export function decodeInteger(value: Buffer): number {
-	if (value.length === 0) throw new BerError("an integer has no bytes");
+	if (value.length === 0)
+		throw new E_TRANSIT_INVALID_BER(["an integer has no bytes"]);
 	if (value.length > 6) {
 		// Beyond this a result code or message id is not something this reads.
-		throw new BerError(`an integer of ${value.length} bytes is out of range`);
+		throw new E_TRANSIT_INVALID_BER([
+			`an integer of ${value.length} bytes is out of range`,
+		]);
 	}
 	let out = value.readInt8(0) < 0 ? -1 : 0;
 	for (const byte of value) out = out * 256 + byte;
@@ -138,7 +138,9 @@ export function messageLength(buffer: Buffer): number | undefined {
 	if (first < 0x80) return 2 + first;
 	const count = first & 0x7f;
 	if (count === 0 || count > 4) {
-		throw new BerError("a message declares a length this refuses to read");
+		throw new E_TRANSIT_INVALID_BER([
+			"a message declares a length this refuses to read",
+		]);
 	}
 	if (buffer.length < 2 + count) return undefined;
 	let length = 0;
@@ -149,9 +151,9 @@ export function messageLength(buffer: Buffer): number | undefined {
 	// Refused on the DECLARATION, not once the bytes have arrived: the point is
 	// never to buffer them.
 	if (total > MAX_MESSAGE_BYTES) {
-		throw new BerError(
+		throw new E_TRANSIT_INVALID_BER([
 			`a message declares ${total} bytes, over the ${MAX_MESSAGE_BYTES} allowed`,
-		);
+		]);
 	}
 	return total;
 }
@@ -172,7 +174,7 @@ function decodeLength(
 	offset: number,
 ): { length: number; at: number } {
 	if (offset >= buffer.length) {
-		throw new BerError("an element has no length");
+		throw new E_TRANSIT_INVALID_BER(["an element has no length"]);
 	}
 	const first = buffer.readUInt8(offset);
 	if (first < 0x80) return { length: first, at: offset + 1 };
@@ -180,12 +182,14 @@ function decodeLength(
 	if (count === 0) {
 		// Indefinite length is legal BER and not legal LDAP; accepting it would
 		// mean scanning for a terminator supplied by the other side.
-		throw new BerError(
+		throw new E_TRANSIT_INVALID_BER([
 			"an element uses an indefinite length, which LDAP does not",
-		);
+		]);
 	}
 	if (count > 4 || offset + 1 + count > buffer.length) {
-		throw new BerError("an element declares a length this refuses to read");
+		throw new E_TRANSIT_INVALID_BER([
+			"an element declares a length this refuses to read",
+		]);
 	}
 	let length = 0;
 	for (let i = 0; i < count; i += 1) {

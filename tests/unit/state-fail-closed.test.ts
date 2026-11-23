@@ -20,19 +20,40 @@ describe("transit > OAuth state is verified, not optional", () => {
 	] as const) {
 		it(`${name}: refuses a callback with no expected state`, async () => {
 			await expect(make().callback("code", "some-state")).rejects.toThrow(
-				/requires expectedState/,
+				expect.objectContaining({
+					code: "E_TRANSIT_STATE_REQUIRED",
+					message: expect.stringMatching(/requires expectedState/),
+				}),
 			);
 		});
 
 		it(`${name}: refuses a state that does not match`, async () => {
 			await expect(make().callback("code", "attacker", "ours")).rejects.toThrow(
-				/state mismatch/,
+				expect.objectContaining({
+					code: "E_OAUTH_STATE_MISMATCH",
+					message: expect.stringMatching(/Unable to verify re-redirect state/),
+				}),
+			);
+		});
+
+		it(`${name}: refuses a callback without its code before the exchange`, async () => {
+			// No request reaches the provider: the refusal names the parameter.
+			await expect(make().callback("", "ours", "ours")).rejects.toThrow(
+				expect.objectContaining({
+					code: "E_OAUTH_MISSING_CODE",
+					status: 500,
+					message:
+						'Cannot request access token. Redirect request is missing the "code" param',
+				}),
 			);
 		});
 
 		it(`${name}: refuses a missing state against an expected one`, async () => {
 			await expect(make().callback("code", undefined, "ours")).rejects.toThrow(
-				/state mismatch/,
+				expect.objectContaining({
+					code: "E_OAUTH_STATE_MISMATCH",
+					message: expect.stringMatching(/Unable to verify re-redirect state/),
+				}),
 			);
 		});
 	}

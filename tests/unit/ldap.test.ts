@@ -9,6 +9,7 @@ import { createServer, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ldap } from "../../src/config.js";
 import { LdapDirectory } from "../../src/drivers/LdapDirectory.js";
+import { E_TRANSIT_LDAP_ERROR } from "../../src/errors.js";
 import { TransitManager } from "../../src/TransitManager.js";
 import { type FakeLdap, startFakeLdap } from "../helpers/fake-ldap.js";
 
@@ -105,8 +106,9 @@ describe("transit > ldap > signing in", () => {
 		// Same answer, and the same exchanges behind it: a second connection
 		// and a bind with the offered password, so the duration does not tell
 		// a known login from an unknown one.
-		expect(unknown).toBeInstanceOf(Error);
-		expect(wrong).toBeInstanceOf(Error);
+		expect(unknown).toBeInstanceOf(E_TRANSIT_LDAP_ERROR);
+		expect(wrong).toBeInstanceOf(E_TRANSIT_LDAP_ERROR);
+		expect(unknown).toMatchObject({ resultCode: 49, status: 400 });
 		expect(String(unknown)).toBe(String(wrong));
 		expect(server?.connections).toBe(wrongWork.connections);
 		expect(server?.connections).toBe(2);
@@ -304,7 +306,12 @@ describe("transit > ldap > through the manager", () => {
 
 		// A directory has nothing to redirect to, and saying so is more useful
 		// than an error about a missing method.
-		expect(() => manager.use("staff")).toThrow(/is a directory/);
+		expect(() => manager.use("staff")).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_NOT_A_REDIRECT_PROVIDER",
+				message: expect.stringMatching(/is a directory/),
+			}),
+		);
 	});
 
 	it("refuses to treat a redirect provider as a directory", async () => {
@@ -316,7 +323,12 @@ describe("transit > ldap > through the manager", () => {
 			},
 		});
 
-		expect(() => manager.directory("google")).toThrow(/not a directory/);
+		expect(() => manager.directory("google")).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_NOT_A_DIRECTORY",
+				message: expect.stringMatching(/not a directory/),
+			}),
+		);
 	});
 
 	it("builds the driver the helper names", async () => {

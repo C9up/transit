@@ -16,13 +16,17 @@ import { deflateRawSync } from "node:zlib";
 import type { AuthorizeCustomizer } from "../AuthorizeRequest.js";
 import { verifyXmlSignature } from "../dsig.js";
 import {
+	E_TRANSIT_NO_AUTHORIZE_PARAMS,
+	E_TRANSIT_SAML_REJECTED,
+	E_TRANSIT_USE_BEGIN,
+} from "../errors.js";
+import {
 	type AssertionReplayStore,
 	MemoryAssertionReplayStore,
 } from "../replay.js";
 import {
 	assertionInside,
 	assertResponseSucceeded,
-	SamlError,
 	type SamlIdentity,
 	validateAssertion,
 } from "../saml.js";
@@ -33,7 +37,7 @@ import type {
 	TransitDriver,
 	TransitUser,
 } from "../types.js";
-import { assertOAuthState } from "../types.js";
+import { assertOAuthCode, assertOAuthState } from "../types.js";
 import { inProduction } from "../vendor/nodeEnv.js";
 import { parseXml } from "../xml.js";
 
@@ -126,11 +130,11 @@ export interface SamlConfig {
  */
 function refuseImplicitMemoryReplayStoreInProduction(): void {
 	if (!inProduction()) return;
-	throw new SamlError(
+	throw new E_TRANSIT_SAML_REJECTED([
 		"SAML replay protection has no store configured, and the in-process default only bounds replay within ONE process — behind a second replica the same assertion is accepted again on each.\n" +
 			"  Set `replayStore: replayStores.redis({ connection })` to share the record across replicas,\n" +
 			"  or `replayStores.memory()` to state that a single process is intended.",
-	);
+	]);
 }
 
 export class SamlDriver implements TransitDriver {
@@ -143,9 +147,9 @@ export class SamlDriver implements TransitDriver {
 			// Without a certificate there is nothing to verify against, and a
 			// driver that discovered that at the first sign-in would have let the
 			// application boot looking healthy.
-			throw new SamlError(
+			throw new E_TRANSIT_SAML_REJECTED([
 				`no signing certificate for '${config.issuer}' — take them from the provider's metadata`,
-			);
+			]);
 		}
 		if (config.replayStore === undefined) {
 			// Decided here, not on the first sign-in: a driver that discovered
@@ -162,9 +166,9 @@ export class SamlDriver implements TransitDriver {
 	 * to answer. There is nothing to build without minting one.
 	 */
 	redirectUrl(): string {
-		throw new Error(
+		throw new E_TRANSIT_USE_BEGIN([
 			"[transit] a SAML sign-in carries a request id the response must answer. Use begin() instead of redirect().",
-		);
+		]);
 	}
 
 	async begin(
@@ -172,9 +176,9 @@ export class SamlDriver implements TransitDriver {
 		customize?: AuthorizeCustomizer,
 	): Promise<RedirectRequest> {
 		if (customize !== undefined) {
-			throw new Error(
+			throw new E_TRANSIT_NO_AUTHORIZE_PARAMS([
 				"[transit] a SAML sign-in has no scopes or authorize parameters to adjust per request.",
-			);
+			]);
 		}
 		// A SAML id is an XML name: it may not start with a digit, and a bare
 		// UUID often does.
@@ -210,11 +214,12 @@ export class SamlDriver implements TransitDriver {
 		expectedState?: string,
 		secret?: string,
 	): Promise<{ user: TransitUser; token: OAuthToken }> {
+		assertOAuthCode(code, "SAMLResponse");
 		assertOAuthState(state, expectedState);
 		if (!secret) {
-			throw new SamlError(
+			throw new E_TRANSIT_SAML_REJECTED([
 				"the request id from begin() is missing — store it with the state and pass it back, or any assertion can be posted here",
-			);
+			]);
 		}
 
 		// Parsed before anything is verified, because the signature is INSIDE the
@@ -227,9 +232,9 @@ export class SamlDriver implements TransitDriver {
 			document.namespaceUri !== PROTOCOL_NS ||
 			document.local !== "Response"
 		) {
-			throw new SamlError(
+			throw new E_TRANSIT_SAML_REJECTED([
 				`expected a <Response>, and the document is <${document.qname}>`,
-			);
+			]);
 		}
 
 		// Read from the unsigned document exactly once, and only this: a refusal
@@ -262,9 +267,9 @@ export class SamlDriver implements TransitDriver {
 		if (!fresh) {
 			// Everything above passes on a captured response posted a second
 			// time. This is what does not.
-			throw new SamlError(
+			throw new E_TRANSIT_SAML_REJECTED([
 				"this assertion has already been used — a response cannot sign somebody in twice",
-			);
+			]);
 		}
 
 		return {
@@ -351,17 +356,17 @@ function trustedDomains(config: SamlConfig): ReadonlySet<string> | undefined {
 	const domains = config.trustedEmailDomains;
 	if (domains === undefined) return undefined;
 	if (config.trustEmail === true) {
-		throw new SamlError(
+		throw new E_TRANSIT_SAML_REJECTED([
 			`'${config.issuer}' sets both trustEmail and trustedEmailDomains — trustEmail already trusts every domain, so say which one is meant`,
-		);
+		]);
 	}
 	const normalized = new Set<string>();
 	for (const domain of domains) {
 		const value = domain.trim().toLowerCase();
 		if (value === "" || value.includes("@")) {
-			throw new SamlError(
+			throw new E_TRANSIT_SAML_REJECTED([
 				`trustedEmailDomains of '${config.issuer}' lists '${domain}', which is not a domain — write 'acme.com', not an address`,
-			);
+			]);
 		}
 		normalized.add(value);
 	}
@@ -387,7 +392,9 @@ function decode(value: string): string {
 		"utf8",
 	);
 	if (!text.includes("<")) {
-		throw new SamlError("the SAMLResponse is not base64-encoded XML");
+		throw new E_TRANSIT_SAML_REJECTED([
+			"the SAMLResponse is not base64-encoded XML",
+		]);
 	}
 	return text;
 }

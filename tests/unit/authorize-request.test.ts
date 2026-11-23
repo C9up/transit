@@ -3,16 +3,14 @@
  * the way upstream's redirect takes a request builder callback.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	AuthorizeRequest,
-	E_TRANSIT_PROTECTED_PARAMETER,
-} from "../../src/AuthorizeRequest.js";
+import { AuthorizeRequest } from "../../src/AuthorizeRequest.js";
 import { oidc, socials } from "../../src/config.js";
 import { GitHubDriver } from "../../src/drivers/GitHubDriver.js";
 import { GoogleDriver } from "../../src/drivers/GoogleDriver.js";
 import { OidcDriver } from "../../src/drivers/OidcDriver.js";
 import { SamlDriver } from "../../src/drivers/SamlDriver.js";
 import { TwitterXDriver } from "../../src/drivers/TwitterXDriver.js";
+import { E_TRANSIT_PROTECTED_PARAMETER } from "../../src/errors.js";
 import { TransitManager } from "../../src/TransitManager.js";
 import { FakeTransit } from "../../src/testing/FakeTransit.js";
 
@@ -196,7 +194,12 @@ describe("transit > providers without per-request parameters", () => {
 		});
 		await expect(
 			driver.begin(undefined, (request) => request.mergeScopes(["x"])),
-		).rejects.toThrow(/no scopes or authorize parameters/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_NO_AUTHORIZE_PARAMS",
+				message: expect.stringMatching(/no scopes or authorize parameters/),
+			}),
+		);
 	});
 });
 

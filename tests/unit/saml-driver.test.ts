@@ -194,7 +194,10 @@ describe("transit > saml > begin", () => {
 
 	it("refuses to build a redirect without minting a request", () => {
 		expect(() => new SamlDriver(config).redirectUrl()).toThrow(
-			/begin\(\) instead of redirect\(\)/,
+			expect.objectContaining({
+				code: "E_TRANSIT_USE_BEGIN",
+				message: expect.stringMatching(/begin\(\) instead of redirect\(\)/),
+			}),
 		);
 	});
 
@@ -317,7 +320,12 @@ describe("transit > saml > callback", () => {
 
 		await expect(
 			driver.callback(response(requestId), started.state, started.state),
-		).rejects.toThrow(/request id from begin\(\) is missing/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_SAML_REJECTED",
+				message: expect.stringMatching(/request id from begin\(\) is missing/),
+			}),
+		);
 	});
 
 	it("refuses a RelayState that was not round-tripped", async () => {
@@ -331,7 +339,12 @@ describe("transit > saml > callback", () => {
 				started.state,
 				started.secret,
 			),
-		).rejects.toThrow(/state mismatch/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_OAUTH_STATE_MISMATCH",
+				message: expect.stringMatching(/Unable to verify re-redirect state/),
+			}),
+		);
 	});
 
 	it("reports what the provider refused", async () => {
@@ -421,7 +434,12 @@ describe("transit > saml > callback", () => {
 				started.state,
 				started.secret,
 			),
-		).rejects.toThrow(/expected a <Response>/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_SAML_REJECTED",
+				message: expect.stringMatching(/expected a <Response>/),
+			}),
+		);
 
 		await expect(
 			driver.callback(
