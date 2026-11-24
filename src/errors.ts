@@ -198,7 +198,18 @@ export const E_TRANSIT_INCOMPLETE_CONNECTION = createError<[message: string]>(
 );
 
 /**
- * The discovery document lacks a required field, or names another issuer.
+ * An OpenID Connect issuer is not an `https` URL. Discovery, the signing keys
+ * and the token exchange would travel in the clear, where whoever sits on the
+ * path can answer them. `http://localhost` is accepted, for development.
+ */
+export const E_TRANSIT_INSECURE_ISSUER = createError<[issuer: unknown]>(
+	"[transit] the OpenID Connect issuer '%s' is not an https URL — only http://localhost is accepted without TLS",
+	"E_TRANSIT_INSECURE_ISSUER",
+);
+
+/**
+ * The discovery document lacks a required field, names another issuer, or
+ * gives an endpoint that is not `https`.
  */
 export const E_TRANSIT_INVALID_DISCOVERY = createError<[message: string]>(
 	"%s",

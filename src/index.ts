@@ -59,7 +59,9 @@ export {
 	SAML_PROTOCOL_NS,
 	type SamlExpectations,
 	type SamlIdentity,
+	type SamlResponseExpectations,
 	validateAssertion,
+	validateResponse,
 } from "./saml.js";
 export { TransitManager } from "./TransitManager.js";
 export type { TransitAppContext } from "./TransitProvider.js";

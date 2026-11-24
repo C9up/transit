@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ldap } from "../../src/config.js";
 import { LdapDirectory } from "../../src/drivers/LdapDirectory.js";
 import { E_TRANSIT_LDAP_ERROR } from "../../src/errors.js";
+import { LdapConnection } from "../../src/ldap.js";
 import { TransitManager } from "../../src/TransitManager.js";
 import { type FakeLdap, startFakeLdap } from "../helpers/fake-ldap.js";
 
@@ -201,6 +202,143 @@ describe("transit > ldap > the empty password", () => {
 		await expect((await directory()).authenticate("", "x")).rejects.toThrow(
 			/username is required/,
 		);
+	});
+});
+
+describe("transit > ldap > a credential that is not a string", () => {
+	/**
+	 * What a controller reads from a request body: typed `string`, and
+	 * whatever the request carried. `password[]=` arrives as `[""]`,
+	 * `password[length]=1` as `{ length: "1" }`, and a JSON body as written.
+	 */
+	const field = (json: string): string => JSON.parse(json);
+
+	/** A directory that answers success to a bind with no password. */
+	const lenient = () => directory([ada], {}, { acceptEmptyPassword: true });
+
+	it("signs in against that directory with the right password only", async () => {
+		const subject = await lenient();
+
+		await expect(subject.authenticate("ada", "wrong")).rejects.toThrow(
+			/invalid credentials/,
+		);
+		expect((await subject.authenticate("ada", "correct horse")).id).toBe(
+			ada.dn,
+		);
+	});
+
+	it.each([
+		["an empty array", "[]"],
+		["an array holding an empty string", '[""]'],
+		["an array holding the password", '["correct horse"]'],
+		["an object with a length", '{"length":"1"}'],
+		["an object with a zero length", '{"length":0}'],
+		["an empty object", "{}"],
+		["null", "null"],
+		["a number", "0"],
+		["a boolean", "true"],
+	])(
+		"refuses a password that is %s, before the directory is reached",
+		async (_what, json) => {
+			const subject = await lenient();
+			const wrong = await subject
+				.authenticate("ada", "wrong")
+				.catch((error: unknown) => error);
+			const before = server?.connections;
+
+			const refused = await subject
+				.authenticate("ada", field(json))
+				.catch((error: unknown) => error);
+
+			// Told exactly what a wrong password is told, and nothing was opened:
+			// no search, and above all no bind as ada with an empty password.
+			expect(refused).toBeInstanceOf(E_TRANSIT_LDAP_ERROR);
+			expect(refused).toMatchObject({
+				code: "E_TRANSIT_LDAP_ERROR",
+				resultCode: 49,
+				status: 400,
+			});
+			expect(String(refused)).toBe(String(wrong));
+			expect(server?.connections).toBe(before);
+			expect(server?.binds.filter((bind) => bind.password === "")).toEqual([]);
+		},
+	);
+
+	it("refuses a password that was not sent at all", async () => {
+		const subject = await lenient();
+		const body: { username: string; password: string } =
+			JSON.parse('{"username":"ada"}');
+
+		await expect(
+			subject.authenticate(body.username, body.password),
+		).rejects.toMatchObject({ resultCode: 49, status: 400 });
+		expect(server?.connections).toBe(0);
+	});
+
+	it.each([
+		["an empty array", "[]"],
+		["an array holding the login", '["ada"]'],
+		["an object with a length", '{"length":1000000}'],
+		["null", "null"],
+		["a number", "7"],
+	])(
+		"refuses a login that is %s, before the directory is reached",
+		async (_what, json) => {
+			const subject = await lenient();
+
+			await expect(
+				subject.authenticate(field(json), "correct horse"),
+			).rejects.toMatchObject({
+				code: "E_TRANSIT_LDAP_ERROR",
+				resultCode: 49,
+				status: 400,
+			});
+			// Nothing was searched for: the login never reached the filter, where
+			// `{ length: n }` would have been encoded as `n` bytes.
+			expect(server?.connections).toBe(0);
+			expect(server?.searched).toEqual([]);
+		},
+	);
+
+	it("cannot send a bind without a password, whatever it is handed", async () => {
+		await lenient();
+		const url = server?.url ?? "";
+
+		for (const json of ['""', "[]", '[""]', '{"length":"1"}', "null"]) {
+			const connection = new LdapConnection({ url, allowInsecure: true });
+			await connection.connect();
+			try {
+				await expect(connection.bind(ada.dn, field(json))).rejects.toThrow(
+					expect.objectContaining({
+						code: "E_TRANSIT_LDAP_ERROR",
+						message: expect.stringMatching(/anonymous bind/),
+					}),
+				);
+			} finally {
+				await connection.close();
+			}
+		}
+
+		// The connections were opened, and no bind request left on any of them.
+		expect(server?.connections).toBe(5);
+		expect(server?.binds).toEqual([]);
+	});
+
+	it("refuses a DN that is not a string rather than encoding it", async () => {
+		await lenient();
+		const connection = new LdapConnection({
+			url: server?.url ?? "",
+			allowInsecure: true,
+		});
+		await connection.connect();
+		try {
+			await expect(
+				connection.bind(field('{"length":64}'), "correct horse"),
+			).rejects.toMatchObject({ code: "E_TRANSIT_INVALID_BER" });
+		} finally {
+			await connection.close();
+		}
+		expect(server?.binds).toEqual([]);
 	});
 });
 

@@ -9,11 +9,15 @@
  *
  * Everything here works on the element the signature covers. Nothing searches
  * the document again: that is the guarantee `verifyXmlSignature` hands over,
- * and re-finding an element would throw it away.
+ * and re-finding an element would throw it away. Elements are reached one
+ * named child at a time, in the SAML namespaces, so nothing is ever read from
+ * under a `<ds:Signature>` — the one part of a signed element its own
+ * signature does not cover.
  */
 
+import { DSIG_NS, isDigested } from "./dsig.js";
 import { E_TRANSIT_SAML_REJECTED } from "./errors.js";
-import { childrenNamed, textOf, walk, type XmlElement } from "./xml.js";
+import { childrenNamed, textOf, type XmlElement } from "./xml.js";
 
 export const SAML_PROTOCOL_NS = "urn:oasis:names:tc:SAML:2.0:protocol";
 export const SAML_ASSERTION_NS = "urn:oasis:names:tc:SAML:2.0:assertion";
@@ -62,6 +66,22 @@ export interface SamlExpectations {
 	now?: number;
 }
 
+/** What the envelope of a response has to say, beyond its assertion. */
+export interface SamlResponseExpectations {
+	/** The provider's entity id, as its metadata declares it. */
+	issuer: string;
+	/** The assertion consumer URL the response was posted to. */
+	destination: string;
+	/** The id of the request this answers. */
+	inResponseTo?: string;
+	/**
+	 * Whether the verified signature covers the response itself, and not only
+	 * its assertion. A signed response has to say where it was sent and who
+	 * issued it; an unsigned one may leave both out.
+	 */
+	signed: boolean;
+}
+
 /**
  * Check the `Status` of a response, and say what the provider refused.
  *
@@ -84,6 +104,63 @@ export function assertResponseSucceeded(response: XmlElement): void {
 			message ? ` — ${textOf(message).trim()}` : ""
 		}`,
 	]);
+}
+
+/**
+ * Check who a response is from, where it was sent and what it answers.
+ *
+ * The assertion says all three again, and `validateAssertion` checks them
+ * there. These are the response's own: a signed response posted to another
+ * address, or answering another request, is refused even when the assertion
+ * inside it would pass (SAML 2.0 core, section 3.2.2; bindings, section
+ * 3.5.5.2; profiles, section 4.1.4.2).
+ *
+ * On a response that is not itself signed these attributes are whatever the
+ * sender wrote, so matching them proves nothing — and a mismatch is still a
+ * response that says it was meant for somewhere else.
+ */
+export function validateResponse(
+	response: XmlElement,
+	expected: SamlResponseExpectations,
+): void {
+	const destination = response.attributes.find(
+		(a) => a.namespaceUri === "" && a.local === "Destination",
+	)?.value;
+	if (destination === undefined) {
+		if (expected.signed) {
+			throw new E_TRANSIT_SAML_REJECTED([
+				"the response is signed and names no destination, which a signed response must",
+			]);
+		}
+	} else if (destination !== expected.destination) {
+		throw new E_TRANSIT_SAML_REJECTED([
+			`the response was sent to '${destination}', and this application answers at '${expected.destination}'`,
+		]);
+	}
+
+	const issuer = childrenNamed(response, SAML_ASSERTION_NS, "Issuer")[0];
+	if (issuer === undefined) {
+		if (expected.signed) {
+			throw new E_TRANSIT_SAML_REJECTED([
+				"the response is signed and names no issuer, which a signed response must",
+			]);
+		}
+	} else if (textOf(issuer).trim() !== expected.issuer) {
+		throw new E_TRANSIT_SAML_REJECTED([
+			`the response is issued by '${textOf(issuer).trim()}', not by '${expected.issuer}'`,
+		]);
+	}
+
+	const answered = response.attributes.find(
+		(a) => a.namespaceUri === "" && a.local === "InResponseTo",
+	)?.value;
+	if (answered !== undefined && answered !== expected.inResponseTo) {
+		throw new E_TRANSIT_SAML_REJECTED([
+			expected.inResponseTo === undefined
+				? "the response answers a request this application did not make"
+				: "the response answers a different request than the one this sign-in made",
+		]);
+	}
 }
 
 /**
@@ -281,26 +358,74 @@ function readAttributes(assertion: XmlElement): Record<string, string[]> {
 	return out;
 }
 
-/** The assertion inside a signed response, when the response is what was signed. */
-export function assertionInside(signed: XmlElement): XmlElement {
+/**
+ * The assertion the verified signature vouches for.
+ *
+ * `response` is the document that was posted, and `signed` what
+ * `verifyXmlSignature` answered for it. The assertion is the one `<Assertion>`
+ * child of the response, and it is accepted only when it is part of what the
+ * signature digested: it is the signed element, or the signed element is the
+ * response around it. Which case holds is decided by the identity of the
+ * nodes, never by looking for an assertion under the signed element — that
+ * search walks into the `<ds:Signature>` the digest leaves out, where anybody
+ * can write one.
+ *
+ * So the signed element is the response or its assertion, and nothing else:
+ * a signed document of another kind (the provider's metadata, a refusal
+ * tucked inside another response) vouches for no assertion here.
+ *
+ * A document that carries SAML under a `<ds:Signature>` is refused outright,
+ * before any of that. Nothing would read it, and no provider writes it: it is
+ * only ever there to be mistaken for signed content.
+ */
+export function assertionInside(
+	signed: XmlElement,
+	response: XmlElement,
+): XmlElement {
 	if (
-		signed.local === "Assertion" &&
-		signed.namespaceUri === SAML_ASSERTION_NS
+		response.namespaceUri !== SAML_PROTOCOL_NS ||
+		response.local !== "Response" ||
+		response.parent !== undefined
 	) {
-		return signed;
+		throw new E_TRANSIT_SAML_REJECTED([
+			`expected the <Response> that was posted, and this is <${response.qname}>`,
+		]);
 	}
-	const assertions = [...walk(signed)].filter(
-		(element) =>
-			element.namespaceUri === SAML_ASSERTION_NS &&
-			element.local === "Assertion",
-	);
+	refuseSamlUnderSignature(response, false);
+	const assertions = childrenNamed(response, SAML_ASSERTION_NS, "Assertion");
 	const [assertion, ...others] = assertions;
 	if (assertion === undefined || others.length > 0) {
 		throw new E_TRANSIT_SAML_REJECTED([
-			`the signed element contains ${assertions.length} assertions, and this reads one`,
+			`the response carries ${assertions.length} assertions, and this reads one`,
+		]);
+	}
+	if (!isDigested(signed, assertion)) {
+		throw new E_TRANSIT_SAML_REJECTED([
+			`the signature covers <${signed.qname}>, which is neither the response nor its assertion`,
 		]);
 	}
 	return assertion;
+}
+
+function refuseSamlUnderSignature(
+	element: XmlElement,
+	underSignature: boolean,
+): void {
+	const inside =
+		underSignature ||
+		(element.namespaceUri === DSIG_NS && element.local === "Signature");
+	if (
+		inside &&
+		(element.namespaceUri === SAML_ASSERTION_NS ||
+			element.namespaceUri === SAML_PROTOCOL_NS)
+	) {
+		throw new E_TRANSIT_SAML_REJECTED([
+			`the document carries <${element.qname}> under a signature, where nothing is signed`,
+		]);
+	}
+	for (const child of element.children) {
+		if (child.type === "element") refuseSamlUnderSignature(child, inside);
+	}
 }
 
 function one(parent: XmlElement, local: string): XmlElement {

@@ -88,7 +88,8 @@ function response(
 		// response's digest covers the assertion's signature too.
 		const responseId = `_r-${requestId}`;
 		const whole =
-			`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="${responseId}">` +
+			`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="${responseId}" Destination="${ACS}" InResponseTo="${requestId}">` +
+			`<saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">${IDP}</saml:Issuer>` +
 			"__SIGNATURE__" +
 			`<samlp:Status><samlp:StatusCode Value="${status}"/></samlp:Status>` +
 			signed +

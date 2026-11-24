@@ -28,6 +28,19 @@ function invalidCredentials(): E_TRANSIT_LDAP_ERROR {
 	);
 }
 
+/**
+ * Whether a credential is something a person typed: a string, of at least one
+ * byte once encoded.
+ *
+ * The signature says `string`, and nothing holds a request body to it: a body
+ * parser answers `[""]` for `password[]=`, `{ length: "1" }` for
+ * `password[length]=1`, and a JSON body carries whatever it carries. None of
+ * those is `""`, and every one of them encodes to an empty password.
+ */
+function isCredential(value: unknown): value is string {
+	return typeof value === "string" && Buffer.byteLength(value, "utf8") > 0;
+}
+
 export interface LdapConfig {
 	/** `ldaps://directory.acme.test:636`. */
 	url: string;
@@ -86,6 +99,13 @@ export class LdapDirectory implements DirectoryDriver {
 			throw new E_TRANSIT_LDAP_ERROR("a username is required", undefined, {
 				status: 400,
 			});
+		}
+		// Anything else that is not text is refused before the directory is
+		// reached, and as a wrong password: there is nothing to tell whoever
+		// sent it. A login is held to the same rule — it would otherwise be
+		// encoded into the search filter at a size the request chose.
+		if (!isCredential(username) || !isCredential(password)) {
+			throw invalidCredentials();
 		}
 
 		const entry = await this.#find(username);

@@ -12,8 +12,9 @@ import {
 	assertResponseSucceeded,
 	type SamlExpectations,
 	validateAssertion,
+	validateResponse,
 } from "../../src/saml.js";
-import { parseXml, walk } from "../../src/xml.js";
+import { parseXml, walk, type XmlElement } from "../../src/xml.js";
 
 const NOW = 1_700_000_000;
 const iso = (offset: number) => new Date((NOW + offset) * 1000).toISOString();
@@ -295,34 +296,207 @@ describe("transit > saml > the response status", () => {
 	});
 });
 
-describe("transit > saml > finding the assertion in a signed response", () => {
-	const signedResponse = parseXml(
-		'<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">' +
-			assertionXml() +
-			"</samlp:Response>",
-	);
+describe("transit > saml > the assertion a signature vouches for", () => {
+	const RESPONSE =
+		'<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">';
+	const response = parseXml(`${RESPONSE}${assertionXml()}</samlp:Response>`);
+	const child = (parent: XmlElement, local: string) => {
+		const found = [...walk(parent)].find((e) => e.local === local);
+		if (!found) throw new Error(`no <${local}>`);
+		return found;
+	};
 
-	it("takes the one assertion a signed response carries", () => {
-		expect(assertionInside(signedResponse).local).toBe("Assertion");
+	it("takes the one assertion of a signed response", () => {
+		expect(assertionInside(response, response)).toBe(
+			child(response, "Assertion"),
+		);
 	});
 
 	it("hands back the assertion itself when that is what was signed", () => {
-		const assertion = [...walk(signedResponse)].find(
-			(e) => e.local === "Assertion",
-		);
-		if (!assertion) throw new Error("no assertion");
+		const assertion = child(response, "Assertion");
 
-		expect(assertionInside(assertion)).toBe(assertion);
+		expect(assertionInside(assertion, response)).toBe(assertion);
 	});
 
-	it("refuses a signed response carrying several assertions", () => {
+	it("refuses a response carrying several assertions", () => {
 		const two = parseXml(
-			'<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">' +
+			`${RESPONSE}${assertionXml()}${assertionXml()}</samlp:Response>`,
+		);
+
+		expect(() => assertionInside(two, two)).toThrow(/carries 2 assertions/);
+	});
+
+	it("refuses a response carrying no assertion", () => {
+		const none = parseXml(`${RESPONSE}</samlp:Response>`);
+
+		expect(() => assertionInside(none, none)).toThrow(/carries 0 assertions/);
+	});
+
+	it("refuses a signed element that is neither the response nor its assertion", () => {
+		// The signature is genuine and covers the subject only: the assertion
+		// around it is not what was signed.
+		expect(() => assertionInside(child(response, "Subject"), response)).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_SAML_REJECTED",
+				message: expect.stringMatching(
+					/covers <saml:Subject>, which is neither the response nor its assertion/,
+				),
+			}),
+		);
+	});
+
+	it("does not look for an assertion below the response's own children", () => {
+		// An assertion nested anywhere else is not the response's assertion,
+		// signed response or not.
+		const nested = parseXml(
+			`${RESPONSE}<samlp:Extensions>${assertionXml()}</samlp:Extensions></samlp:Response>`,
+		);
+
+		expect(() => assertionInside(nested, nested)).toThrow(
+			/carries 0 assertions/,
+		);
+	});
+
+	it("refuses a document that is not a response", () => {
+		const assertion = parseXml(assertionXml());
+
+		expect(() => assertionInside(assertion, assertion)).toThrow(
+			/expected the <Response> that was posted/,
+		);
+	});
+
+	it("refuses a response that is not the document that was posted", () => {
+		const outer = parseXml(
+			`${RESPONSE}${RESPONSE}${assertionXml()}</samlp:Response></samlp:Response>`,
+		);
+		const inner = outer.children.find((node) => node.type === "element");
+		if (!inner) throw new Error("no inner response");
+
+		expect(() => assertionInside(inner, inner)).toThrow(
+			/expected the <Response> that was posted/,
+		);
+	});
+
+	it("refuses SAML written under a signature", () => {
+		const hidden = parseXml(
+			`${RESPONSE}${assertionXml()}` +
+				'<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:Object>' +
 				assertionXml() +
-				assertionXml() +
+				"</ds:Object></ds:Signature></samlp:Response>",
+		);
+
+		expect(() => assertionInside(hidden, hidden)).toThrow(
+			/<saml:Assertion> under a signature/,
+		);
+	});
+});
+
+describe("transit > saml > the envelope of a response", () => {
+	const envelope = {
+		issuer: expected.issuer,
+		destination: expected.recipient,
+		inResponseTo: "req-1",
+	};
+	const responseXml = (attributes: string, issuer?: string) =>
+		parseXml(
+			`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"${attributes}>` +
+				(issuer === undefined
+					? ""
+					: `<saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">${issuer}</saml:Issuer>`) +
 				"</samlp:Response>",
 		);
 
-		expect(() => assertionInside(two)).toThrow(/contains 2 assertions/);
+	it("accepts a signed response sent here, by the provider, for this request", () => {
+		expect(() =>
+			validateResponse(
+				responseXml(
+					` Destination="${expected.recipient}" InResponseTo="req-1"`,
+					expected.issuer,
+				),
+				{ ...envelope, signed: true },
+			),
+		).not.toThrow();
+	});
+
+	it("accepts an unsigned response that says nothing", () => {
+		expect(() =>
+			validateResponse(responseXml(""), { ...envelope, signed: false }),
+		).not.toThrow();
+	});
+
+	it("refuses a signed response with no destination", () => {
+		expect(() =>
+			validateResponse(responseXml("", expected.issuer), {
+				...envelope,
+				signed: true,
+			}),
+		).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_SAML_REJECTED",
+				message: expect.stringMatching(/signed and names no destination/),
+			}),
+		);
+	});
+
+	it("refuses a destination that is not this application, signed or not", () => {
+		for (const signed of [true, false]) {
+			expect(() =>
+				validateResponse(
+					responseXml(' Destination="https://other.test/acs"', expected.issuer),
+					{ ...envelope, signed },
+				),
+			).toThrow(/sent to 'https:\/\/other.test\/acs'/);
+		}
+	});
+
+	it("refuses a signed response with no issuer", () => {
+		expect(() =>
+			validateResponse(responseXml(` Destination="${expected.recipient}"`), {
+				...envelope,
+				signed: true,
+			}),
+		).toThrow(/signed and names no issuer/);
+	});
+
+	it("refuses another issuer, signed or not", () => {
+		for (const signed of [true, false]) {
+			expect(() =>
+				validateResponse(
+					responseXml(
+						` Destination="${expected.recipient}"`,
+						"https://evil.test",
+					),
+					{ ...envelope, signed },
+				),
+			).toThrow(/issued by 'https:\/\/evil.test'/);
+		}
+	});
+
+	it("refuses a response answering another request", () => {
+		expect(() =>
+			validateResponse(
+				responseXml(
+					` Destination="${expected.recipient}" InResponseTo="req-2"`,
+					expected.issuer,
+				),
+				{ ...envelope, signed: true },
+			),
+		).toThrow(/answers a different request/);
+	});
+
+	it("refuses a response answering a request when none was made", () => {
+		expect(() =>
+			validateResponse(
+				responseXml(
+					` Destination="${expected.recipient}" InResponseTo="req-1"`,
+					expected.issuer,
+				),
+				{
+					issuer: envelope.issuer,
+					destination: envelope.destination,
+					signed: true,
+				},
+			),
+		).toThrow(/a request this application did not make/);
 	});
 });

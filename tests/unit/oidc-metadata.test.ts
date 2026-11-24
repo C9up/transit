@@ -185,6 +185,101 @@ describe("transit > discovery", () => {
 	});
 });
 
+describe("transit > discovery > an issuer without TLS", () => {
+	it.each([
+		["plain http", "http://id.acme.test"],
+		["plain http on a port", "http://id.acme.test:8080/realms/acme"],
+		["http in capitals", "HTTP://ID.ACME.TEST"],
+		["a host that only starts with localhost", "http://localhost.evil.test"],
+		["another scheme on localhost", "ftp://localhost/realms/acme"],
+		["no scheme", "id.acme.test"],
+		["a scheme-relative address", "//id.acme.test"],
+		["nothing", ""],
+	])("refuses %s before anything is fetched", (_what, issuer) => {
+		const calls = stubFetch({ body: metadata });
+
+		expect(() => new OidcDiscovery(issuer)).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INSECURE_ISSUER",
+				message: expect.stringMatching(/is not an https URL/),
+			}),
+		);
+		expect(calls).toEqual([]);
+	});
+
+	it("accepts http://localhost, for a provider run on a laptop", async () => {
+		const local = "http://localhost:8080/realms/acme";
+		const calls = stubFetch({
+			body: {
+				issuer: local,
+				authorization_endpoint: `${local}/auth`,
+				token_endpoint: `${local}/token`,
+				jwks_uri: `${local}/certs`,
+				userinfo_endpoint: `${local}/userinfo`,
+			},
+		});
+
+		const found = await new OidcDiscovery(local).metadata();
+
+		expect(found.jwks_uri).toBe(`${local}/certs`);
+		expect(calls).toEqual([`${local}/.well-known/openid-configuration`]);
+	});
+
+	it.each([
+		"authorization_endpoint",
+		"token_endpoint",
+		"jwks_uri",
+		"userinfo_endpoint",
+	])("refuses a discovery document whose %s is plain http", async (field) => {
+		// The issuer is https and so was this document. One endpoint is not:
+		// that part of the sign-in would leave in the clear.
+		stubFetch({ body: { ...metadata, [field]: "http://id.acme.test/x" } });
+
+		await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_DISCOVERY",
+				message: expect.stringMatching(
+					new RegExp(`gives a ${field} that is not an https URL`),
+				),
+			}),
+		);
+	});
+
+	it("refuses an endpoint that is not a URL at all", async () => {
+		stubFetch({ body: { ...metadata, jwks_uri: "/jwks" } });
+
+		await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
+			/gives a jwks_uri that is not an https URL/,
+		);
+	});
+
+	it("does not let an https issuer send its keys to http://localhost", async () => {
+		// The exception is for an issuer that is itself local. A real issuer
+		// naming a local endpoint would have this server fetch from itself.
+		stubFetch({ body: { ...metadata, jwks_uri: "http://localhost/jwks" } });
+
+		await expect(new OidcDiscovery(ISSUER).metadata()).rejects.toThrow(
+			/gives a jwks_uri that is not an https URL/,
+		);
+	});
+
+	it("does not let a local issuer name a plain-http endpoint elsewhere", async () => {
+		const local = "http://localhost:8080";
+		stubFetch({
+			body: {
+				issuer: local,
+				authorization_endpoint: `${local}/auth`,
+				token_endpoint: "http://id.acme.test/token",
+				jwks_uri: `${local}/certs`,
+			},
+		});
+
+		await expect(new OidcDiscovery(local).metadata()).rejects.toThrow(
+			/gives a token_endpoint that is not an https URL/,
+		);
+	});
+});
+
 const keys = (...kids: string[]) => ({
 	keys: kids.map((kid) => ({ kty: "RSA", kid, n: "x", e: "AQAB" })),
 });
@@ -284,5 +379,126 @@ describe("transit > signing keys", () => {
 				message: expect.stringMatching(/no `keys` array/),
 			}),
 		);
+	});
+});
+
+describe("transit > signing keys > a key the provider withdrew", () => {
+	const URI = `${ISSUER}/jwks`;
+	const HOUR = 3_600_000;
+
+	it("stops answering a withdrawn key once the set is older than ttlMs", async () => {
+		// The provider signs with two keys. One leaks and is withdrawn; tokens
+		// go on naming the other, so nothing ever asks for an unknown key.
+		const calls = stubFetch(
+			{ body: keys("leaked", "current") },
+			{
+				body: keys("current"),
+			},
+		);
+		let clock = 0;
+		const cache = new JwksCache({ ttlMs: HOUR, now: () => clock });
+
+		expect((await cache.key(URI, "current")).kid).toBe("current");
+		// Thirty days of sign-ins with the key that is still published.
+		for (let day = 1; day <= 30; day += 1) {
+			clock = day * 24 * HOUR;
+			expect((await cache.key(URI, "current")).kid).toBe("current");
+		}
+
+		await expect(cache.key(URI, "leaked")).rejects.toThrow(
+			expect.objectContaining({ code: "E_TRANSIT_UNKNOWN_SIGNING_KEY" }),
+		);
+		// The set was read again each time it had aged out, never more.
+		expect(calls).toHaveLength(31);
+	});
+
+	it("asks again for a held key exactly when the set reaches ttlMs", async () => {
+		const calls = stubFetch({ body: keys("a") });
+		let clock = 0;
+		const cache = new JwksCache({ ttlMs: HOUR, now: () => clock });
+
+		await cache.key(URI, "a");
+		clock = HOUR - 1;
+		await cache.key(URI, "a");
+		expect(calls).toHaveLength(1);
+
+		clock = HOUR;
+		await cache.key(URI, "a");
+		expect(calls).toHaveLength(2);
+
+		// And the new set is trusted for a full ttlMs from its own fetch.
+		clock = 2 * HOUR - 1;
+		await cache.key(URI, "a");
+		expect(calls).toHaveLength(2);
+	});
+
+	it("trusts a set for one hour when nothing says otherwise", async () => {
+		const calls = stubFetch({ body: keys("a") });
+		let clock = 0;
+		const cache = new JwksCache({ now: () => clock });
+
+		await cache.key(URI, "a");
+		clock = HOUR - 1;
+		await cache.key(URI, "a");
+		expect(calls).toHaveLength(1);
+		clock = HOUR;
+		await cache.key(URI, "a");
+		expect(calls).toHaveLength(2);
+	});
+
+	it("answers nothing from an aged set when the provider cannot be asked", async () => {
+		stubFetch({ body: keys("a") }, { ok: false, status: 503, body: {} });
+		let clock = 0;
+		const cache = new JwksCache({ ttlMs: HOUR, now: () => clock });
+
+		await cache.key(URI, "a");
+		clock = HOUR;
+
+		// The key is still in memory. It is past its age, so it is not used.
+		await expect(cache.key(URI, "a")).rejects.toThrow(
+			expect.objectContaining({ code: "E_TRANSIT_JWKS_FAILED" }),
+		);
+	});
+
+	it("reads an aged set once for sign-ins that arrive together", async () => {
+		const calls = stubFetch({ body: keys("a") });
+		let clock = 0;
+		const cache = new JwksCache({ ttlMs: HOUR, now: () => clock });
+
+		await cache.key(URI, "a");
+		clock = HOUR;
+		await Promise.all([
+			cache.key(URI, "a"),
+			cache.key(URI, "a"),
+			cache.key(URI, "a"),
+		]);
+
+		expect(calls).toHaveLength(2);
+	});
+
+	it("does not answer one address with the keys of another", async () => {
+		const calls = stubFetch({ body: keys("a") }, { body: keys("b") });
+		const cache = new JwksCache();
+
+		await cache.key(URI, "a");
+		// The provider moved its key set: what was read at the old address says
+		// nothing about the new one.
+		await expect(cache.key(`${ISSUER}/keys/v2`, "a")).rejects.toThrow(
+			expect.objectContaining({ code: "E_TRANSIT_UNKNOWN_SIGNING_KEY" }),
+		);
+		expect(calls).toEqual([URI, `${ISSUER}/keys/v2`]);
+	});
+
+	it("reads the set again when the clock went backwards", async () => {
+		const calls = stubFetch({ body: keys("a") });
+		let clock = 10 * HOUR;
+		const cache = new JwksCache({ ttlMs: HOUR, now: () => clock });
+
+		await cache.key(URI, "a");
+		// An age that cannot be computed is not an age under the limit.
+		clock = 0;
+		await cache.key(URI, "a");
+
+		expect(calls).toHaveLength(2);
 	});
 });

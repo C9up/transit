@@ -176,7 +176,7 @@ export class FakeTransit extends TransitManager {
 	 * The empty-password refusal is repeated here for the same reason the state
 	 * check is: a bind with no password is an anonymous bind the directory
 	 * accepts, and a fake that let it through would teach an application to
-	 * submit one.
+	 * submit one. So is the refusal of a credential that is not a string.
 	 */
 	override async authenticate(
 		name: string,
@@ -196,6 +196,14 @@ export class FakeTransit extends TransitManager {
 			throw new E_TRANSIT_LDAP_ERROR("a username is required", undefined, {
 				status: 400,
 			});
+		}
+		// As the real directory does: a request body carries arrays and objects
+		// where a field was expected, and none of them is a credential.
+		if (typeof username !== "string" || typeof password !== "string") {
+			throw new E_TRANSIT_LDAP_ERROR(
+				"the directory refused the bind: invalid credentials",
+				49,
+			);
 		}
 		const user = this.#identities.get(name);
 		if (!user) {

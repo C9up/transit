@@ -58,6 +58,11 @@ export async function startFakeLdap(
 		bindReplyTag?: number;
 		/** Answer success to every bind, as a misconfigured directory would. */
 		acceptEveryBind?: boolean;
+		/**
+		 * Answer success to a bind that names somebody and carries no password
+		 * — the unauthenticated bind, which Active Directory accepts by default.
+		 */
+		acceptEmptyPassword?: boolean;
 	} = {},
 ): Promise<FakeLdap> {
 	const loginAttribute = options.loginAttribute ?? "uid";
@@ -94,6 +99,8 @@ export async function startFakeLdap(
 					const known = entries.find((entry) => entry.dn === dn);
 					const ok =
 						options.acceptEveryBind === true ||
+						(options.acceptEmptyPassword === true &&
+							(passwordElement?.value.length ?? 0) === 0) ||
 						dn === "" ||
 						(known ? known.password === password : dn.startsWith("cn=reader"));
 					socket.write(

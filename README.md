@@ -124,7 +124,10 @@ const user = await transit.authenticate('staff', username, password)
 ```
 
 An empty password is refused before a socket is opened: a simple bind with no
-password is an anonymous bind, and the directory answers success. And there is
+password is an anonymous bind, and the directory answers success. A login or a
+password that is not a string — an array or an object from a request body,
+which would be sent as an empty password — is refused the same way, as invalid
+credentials. And there is
 no filter string — a filter is a structure whose values are written as octets,
 so a username cannot become syntax.
 
@@ -213,6 +216,13 @@ and the `nonce`. Only asymmetric signatures are accepted.
 The issuer is compared byte for byte with the discovery document's `issuer` and
 with every token's `iss`, so write it exactly as the provider does — Auth0's
 ends with a slash (`https://tenant.auth0.com/`).
+
+The issuer must be `https`, and so must the endpoints its discovery document
+gives: over plain HTTP, whoever sits on the path can publish a key of their own
+and sign a token for any user. `http://localhost` is the one exception, for a
+provider run on your own machine. The signing keys are fetched again once they
+are an hour old (`cache.ttlMs`), so a key the provider withdrew stops verifying
+tokens within that time.
 
 ## Before linking an account by email
 

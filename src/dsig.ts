@@ -19,9 +19,16 @@
  *     and it multiplies what "the signed element" could mean.
  *   - The reference must resolve to exactly ONE element. A second element
  *     carrying the same ID is the classic wrapping payload.
- *   - The signature must sit inside the element it signs. A signature that
- *     references a sibling is describing a document this refuses to reason
- *     about.
+ *   - The signed element is the signature's own PARENT, and the reference has
+ *     to name it. It is taken from where the signature sits, never from where
+ *     an id points: SAML signatures are enveloped, as a child of what they
+ *     sign (SAML 2.0 core, section 5.4), so a signature that references a
+ *     sibling, or an ancestor further up, is describing a document this
+ *     refuses to reason about.
+ *   - The enveloped-signature transform is required, and it leaves the
+ *     signature's whole subtree out of the digest. Nothing under a
+ *     `<ds:Signature>` is signed, whatever it looks like — see
+ *     {@link isDigested}, which is how a reader stays out of it.
  *   - Only the enveloped-signature and exclusive-c14n transforms are accepted.
  *     XPath and XSLT transforms are a way to make the digest cover something
  *     other than the element, and XSLT is executable.
@@ -189,16 +196,34 @@ export function verifyXmlSignature(
 		throw new E_TRANSIT_INVALID_SIGNATURE(["the signature does not verify"]);
 	}
 
-	const signed = verifyReference(root, signature, signedInfo);
-	if (otherSignatures.length > 0 && signed !== root) {
-		// Enveloped in the root and contained by what it signs, the reference
-		// can only be the root; said out loud, since the inner signatures are
-		// trusted only because this one covers them.
-		throw new E_TRANSIT_INVALID_SIGNATURE([
-			"the root's signature does not cover the root, and the document carries other signatures",
-		]);
+	// With several signatures the one verified is a child of the root, and a
+	// signature covers its parent or nothing: what comes back is the root, and
+	// the inner signatures are bytes it vouches for.
+	return verifyReference(root, signature, signedInfo);
+}
+
+/**
+ * Whether `node` is part of what the signature over `signed` digested: `signed`
+ * itself or something inside it, and under no `<ds:Signature>` on the way up.
+ *
+ * `signed` must be what {@link verifyXmlSignature} returned. The
+ * enveloped-signature transform leaves the signature's own subtree out of the
+ * digest, so an element written there — in a `<ds:Object>`, a `<ds:KeyInfo>`,
+ * a `<ds:SignatureProperties>` — is inside the signed element and signed by
+ * nobody. A signature that is NOT the verified one is ordinary digested
+ * content, and is refused here all the same: nothing a reader wants lives
+ * under a signature, and telling the two apart is one more thing to get wrong.
+ */
+export function isDigested(signed: XmlElement, node: XmlElement): boolean {
+	for (
+		let at: XmlElement | undefined = node;
+		at !== undefined;
+		at = at.parent
+	) {
+		if (at.namespaceUri === DSIG_NS && at.local === "Signature") return false;
+		if (at === signed) return true;
 	}
-	return signed;
+	return false;
 }
 
 /**
@@ -234,8 +259,8 @@ function verifyReference(
 			(a) => a.namespaceUri === "" && isIdAttribute(a.local) && a.value === id,
 		),
 	);
-	const [signed, ...otherMatches] = matches;
-	if (signed === undefined) {
+	const [named, ...otherMatches] = matches;
+	if (named === undefined) {
 		throw new E_TRANSIT_INVALID_SIGNATURE([
 			`the reference names '${id}', which is not in the document`,
 		]);
@@ -249,16 +274,18 @@ function verifyReference(
 		]);
 	}
 
-	if (!contains(signed, signature)) {
+	// The signed element is where the signature sits, and the reference only
+	// has to agree. Resolving it the other way round — from the id to whatever
+	// carries it — is what lets a signature be valid over one element while
+	// it is enveloped in another.
+	const signed = signature.parent;
+	if (signed === undefined || signed !== named) {
 		throw new E_TRANSIT_INVALID_SIGNATURE([
-			"the signature sits outside the element it references, which this refuses to reason about",
+			"the signature is not a child of the element it references, which this refuses to reason about",
 		]);
 	}
 
-	const { inclusivePrefixes, withComments } = readTransforms(
-		reference,
-		signature,
-	);
+	const { inclusivePrefixes, withComments } = readTransforms(reference);
 
 	const digestMethod = only(reference, "DigestMethod").attributes.find(
 		(a) => a.local === "Algorithm",
@@ -271,7 +298,8 @@ function verifyReference(
 	}
 
 	// The enveloped-signature transform: the element cannot carry a digest of
-	// itself, so the signature is left out of what is hashed.
+	// itself, so the signature is left out of what is hashed — all of it, which
+	// is why nothing under it may ever be read as signed.
 	const omit: ReadonlySet<XmlNode> = new Set<XmlNode>([signature]);
 	const digest = createHash(hash)
 		.update(
@@ -291,10 +319,10 @@ function verifyReference(
 }
 
 /** Which transforms the reference asks for, refusing the dangerous ones. */
-function readTransforms(
-	reference: XmlElement,
-	signature: XmlElement,
-): { inclusivePrefixes: string[]; withComments: boolean } {
+function readTransforms(reference: XmlElement): {
+	inclusivePrefixes: string[];
+	withComments: boolean;
+} {
 	const container = childrenNamed(reference, DSIG_NS, "Transforms")[0];
 	const transforms = container
 		? childrenNamed(container, DSIG_NS, "Transform")
@@ -330,9 +358,9 @@ function readTransforms(
 		]);
 	}
 
-	if (!sawEnveloped && contains(signature.parent ?? signature, signature)) {
-		// A signature inside the element it signs has to be excluded from the
-		// digest, and the transform is how that is declared.
+	if (!sawEnveloped) {
+		// The signature is a child of the element it signs, so it has to be
+		// excluded from the digest, and the transform is how that is declared.
 		throw new E_TRANSIT_INVALID_SIGNATURE([
 			"the signature is inside the element it signs and does not declare the enveloped-signature transform",
 		]);
@@ -413,18 +441,6 @@ function only(parent: XmlElement, local: string): XmlElement {
 		]);
 	}
 	return element;
-}
-
-/** Whether `descendant` sits inside `ancestor`, or is it. */
-function contains(ancestor: XmlElement, descendant: XmlElement): boolean {
-	for (
-		let node: XmlElement | undefined = descendant;
-		node !== undefined;
-		node = node.parent
-	) {
-		if (node === ancestor) return true;
-	}
-	return false;
 }
 
 /**

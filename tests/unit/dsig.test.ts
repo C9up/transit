@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { canonicalize } from "../../src/c14n.js";
-import { verifyXmlSignature } from "../../src/dsig.js";
+import { isDigested, verifyXmlSignature } from "../../src/dsig.js";
 import { parseXml, textOf, walk, type XmlNode } from "../../src/xml.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../fixtures");
@@ -154,7 +154,42 @@ describe("transit > dsig > wrapping", () => {
 			);
 
 		expect(() => verifyXmlSignature(parseXml(moved), { certificates })).toThrow(
-			/sits outside the element it references/,
+			/not a child of the element it references/,
+		);
+	});
+
+	it("refuses a signature buried deeper than a child of what it references", () => {
+		// The digest leaves the signature out wherever it sits, so the document
+		// verifies either way. An enveloped signature is the signed element's
+		// own child, and the signed element is taken from there.
+		const SIGNATURE = /<ds:Signature[\s\S]*<\/ds:Signature>/;
+		const signature = SIGNATURE.exec(sign(template, "a-1"))?.[0] ?? "";
+		const buried = sign(template, "a-1")
+			.replace(SIGNATURE, "")
+			.replace(
+				"<Subject>ada@acme.test</Subject>",
+				`<Subject>ada@acme.test${signature}</Subject>`,
+			);
+
+		expect(() =>
+			verifyXmlSignature(parseXml(buried), { certificates }),
+		).toThrow(
+			expect.objectContaining({
+				code: "E_TRANSIT_INVALID_SIGNATURE",
+				message: expect.stringMatching(
+					/not a child of the element it references/,
+				),
+			}),
+		);
+	});
+
+	it("refuses a signature that does not declare the enveloped transform", () => {
+		const plain = sign(template, "a-1", {
+			transform: "http://www.w3.org/2001/10/xml-exc-c14n#",
+		});
+
+		expect(() => verifyXmlSignature(parseXml(plain), { certificates })).toThrow(
+			/does not declare the enveloped-signature transform/,
 		);
 	});
 
@@ -177,6 +212,59 @@ describe("transit > dsig > wrapping", () => {
 		expect(() =>
 			verifyXmlSignature(parseXml(external), { certificates }),
 		).toThrow(/same-document '#id' reference/);
+	});
+});
+
+describe("transit > dsig > what a signature digests", () => {
+	const document = parseXml(
+		sign(template, "a-1").replace(
+			"</ds:Signature>",
+			'<ds:Object><Assertion xmlns="urn:oasis:names:tc:SAML:2.0:assertion" ID="forged">' +
+				"<Subject>attacker@evil.test</Subject></Assertion></ds:Object></ds:Signature>",
+		),
+	);
+	const named = (local: string, id?: string) => {
+		const found = [...walk(document)].find(
+			(element) =>
+				element.local === local &&
+				(id === undefined ||
+					element.attributes.some((a) => a.local === "ID" && a.value === id)),
+		);
+		if (!found) throw new Error(`no <${local}>`);
+		return found;
+	};
+
+	it("still verifies a document with content added under its signature", () => {
+		// The premise of the attack: the digest never sees the signature.
+		expect(verifyXmlSignature(document, { certificates })).toBe(
+			named("Assertion", "a-1"),
+		);
+	});
+
+	it("counts the signed element and what is inside it", () => {
+		const signed = verifyXmlSignature(document, { certificates });
+
+		const subject = signed.children.find(
+			(node) => node.type === "element" && node.local === "Subject",
+		);
+		if (subject?.type !== "element") throw new Error("no <Subject>");
+
+		expect(isDigested(signed, signed)).toBe(true);
+		expect(isDigested(signed, subject)).toBe(true);
+	});
+
+	it("counts nothing under the signature, whatever it looks like", () => {
+		const signed = verifyXmlSignature(document, { certificates });
+
+		expect(isDigested(signed, named("Assertion", "forged"))).toBe(false);
+		expect(isDigested(signed, named("Object"))).toBe(false);
+		expect(isDigested(signed, named("Signature"))).toBe(false);
+	});
+
+	it("counts nothing outside the signed element", () => {
+		const signed = verifyXmlSignature(document, { certificates });
+
+		expect(isDigested(signed, document)).toBe(false);
 	});
 });
 

@@ -29,6 +29,7 @@ import {
 	decodeSequence,
 	decodeString,
 	ENUMERATED,
+	encode,
 	encodeBoolean,
 	encodeInteger,
 	encodeSequence,
@@ -185,21 +186,30 @@ export class LdapConnection {
 	 * Bind as `dn` with `password`.
 	 *
 	 * An empty password is refused here, before anything is sent. The server
-	 * would answer success: a simple bind with no password is an anonymous
-	 * bind, and a login form that passes one through authenticates as whoever
-	 * was named.
+	 * would answer success: a simple bind with a name and no password is an
+	 * unauthenticated bind (RFC 4513, section 5.1.2), and a login form that
+	 * passes one through authenticates as whoever was named.
+	 *
+	 * What is checked is the octets that would be sent, not the argument: a
+	 * password that is not a string — an array, an object, which a request
+	 * body produces as readily as a string — is not `""` and would still
+	 * encode to nothing.
 	 */
 	async bind(dn: string, password: string): Promise<void> {
-		if (password === "") {
+		const credentials =
+			typeof password === "string"
+				? Buffer.from(password, "utf8")
+				: Buffer.alloc(0);
+		if (credentials.length === 0) {
 			throw new E_TRANSIT_LDAP_ERROR(
-				"an empty password is an anonymous bind, which the directory accepts — refused here instead",
+				"a bind needs a password that is a non-empty string — an empty one is an anonymous bind, which the directory accepts, so it is refused here instead",
 			);
 		}
 		const body = encodeSequence(
 			[
 				encodeInteger(3),
 				encodeString(dn),
-				encodeString(password, contextPrimitive(0)),
+				encode(contextPrimitive(0), credentials),
 			],
 			BIND_REQUEST,
 		);

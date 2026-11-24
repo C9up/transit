@@ -97,6 +97,31 @@ describe("transit > ber > strings and sequences", () => {
 		expect(round).toBe(hostile);
 	});
 
+	it("refuses to encode anything but a string", () => {
+		// What a request body hands over where a field was expected. Each of
+		// these used to encode: an array as its elements, `{ length: n }` as
+		// `n` zero bytes — an allocation the sender sized.
+		const field = (json: string): string => JSON.parse(json);
+
+		for (const json of [
+			"[]",
+			'[""]',
+			'["ada"]',
+			'{"length":16}',
+			"{}",
+			"null",
+			"7",
+			"true",
+		]) {
+			expect(() => encodeString(field(json))).toThrow(
+				expect.objectContaining({
+					code: "E_TRANSIT_INVALID_BER",
+					message: expect.stringMatching(/as a string/),
+				}),
+			);
+		}
+	});
+
 	it("reads back every element of a sequence", () => {
 		const encoded = encodeSequence([
 			encodeInteger(1),

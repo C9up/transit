@@ -50,6 +50,15 @@ export function encodeInteger(value: number, tag = INTEGER): Buffer {
 }
 
 export function encodeString(value: string, tag = OCTET_STRING): Buffer {
+	// The type is checked, not assumed: a request body hands over arrays and
+	// objects where a form field was expected, and `Buffer.from` takes them —
+	// an array becomes its elements as bytes, and `{ length: n }` becomes `n`
+	// zero bytes, a size the sender chose.
+	if (typeof value !== "string") {
+		throw new E_TRANSIT_INVALID_BER([
+			`cannot encode ${value === null ? "null" : `a value of type ${typeof value}`} as a string`,
+		]);
+	}
 	// The value is written as length-prefixed bytes, never interpolated. That
 	// is what makes injection impossible rather than merely escaped.
 	return encode(tag, Buffer.from(value, "utf8"));

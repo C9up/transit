@@ -173,6 +173,24 @@ describe("transit > FakeTransit > a directory", () => {
 		transit.assertNobodySignedIn();
 	});
 
+	it("refuses a credential that is not a string, as the real one does", async () => {
+		const transit = new FakeTransit().willReturn("staff");
+		// What a controller reads from a request body, typed `string`.
+		const field = (json: string): string => JSON.parse(json);
+
+		// No credentials were declared, so any pair is accepted — any pair of
+		// strings. An array from `password[]=` is not a password.
+		for (const json of ["[]", '[""]', '{"length":"1"}', "null"]) {
+			await expect(
+				transit.authenticate("staff", "ada", field(json)),
+			).rejects.toMatchObject({ resultCode: 49, status: 400 });
+			await expect(
+				transit.authenticate("staff", field(json), "x"),
+			).rejects.toMatchObject({ resultCode: 49, status: 400 });
+		}
+		transit.assertNobodySignedIn();
+	});
+
 	it("refuses an empty username", async () => {
 		const transit = new FakeTransit().willReturn("staff");
 

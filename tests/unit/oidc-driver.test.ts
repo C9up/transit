@@ -178,6 +178,22 @@ describe("transit > oidc > begin", () => {
 		expect(new URL(started.url).searchParams.get("scope")).toBe("openid email");
 	});
 
+	it("refuses to exist for an issuer on plain http", () => {
+		const calls = stubProvider({});
+
+		// Built when the manager is, so this stops the application at boot and
+		// not at somebody's first sign-in.
+		for (const build of [
+			() => new OidcDriver({ ...config, issuer: "http://id.acme.test" }),
+			() => oidc({ ...config, issuer: "http://id.acme.test" })(),
+		]) {
+			expect(build).toThrow(
+				expect.objectContaining({ code: "E_TRANSIT_INSECURE_ISSUER" }),
+			);
+		}
+		expect(calls).toEqual([]);
+	});
+
 	it("refuses to build a redirect offline", () => {
 		expect(() => new OidcDriver(config).redirectUrl()).toThrow(
 			expect.objectContaining({
@@ -388,6 +404,61 @@ describe("transit > oidc > callback", () => {
 				code: "E_TRANSIT_INVALID_ID_TOKEN",
 				message: expect.stringMatching(/signature does not verify/),
 			}),
+		);
+	});
+
+	it("refuses a token signed with a key the provider has since withdrawn", async () => {
+		// The key is real and the signature holds: all that changed is that the
+		// provider no longer publishes it, which is how a leaked key is revoked.
+		let clock = 0;
+		const driver = new OidcDriver({
+			...config,
+			userinfo: false,
+			cache: { ttlMs: 3_600_000, now: () => clock },
+		});
+		const next = generateKeyPairSync("rsa", { modulusLength: 2048 });
+		const routes = (published: Jwk[], nonce: string) => ({
+			[`${ISSUER}/.well-known`]: metadata,
+			[`${ISSUER}/token`]: {
+				access_token: "at",
+				id_token: idToken(claims({ nonce })),
+			},
+			[`${ISSUER}/jwks`]: { keys: published },
+		});
+
+		const first = await begin(driver);
+		stubProvider(routes([jwk], first.nonce));
+		await driver.callback(
+			"code",
+			first.started.state,
+			first.started.state,
+			first.started.secret,
+		);
+
+		clock = 3_600_000;
+		const second = await begin(driver);
+		stubProvider(
+			routes(
+				[
+					{
+						...next.publicKey.export({ format: "jwk" }),
+						kty: "RSA",
+						kid: "k2",
+					},
+				],
+				second.nonce,
+			),
+		);
+
+		await expect(
+			driver.callback(
+				"code",
+				second.started.state,
+				second.started.state,
+				second.started.secret,
+			),
+		).rejects.toThrow(
+			expect.objectContaining({ code: "E_TRANSIT_UNKNOWN_SIGNING_KEY" }),
 		);
 	});
 

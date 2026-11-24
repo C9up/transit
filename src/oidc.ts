@@ -7,10 +7,16 @@
  * the worst moment; a cache that refreshes whenever a token names an unknown
  * key hands anyone a way to make this application hammer the provider. The
  * middle is a rate limit.
+ *
+ * Both also age. A key is withdrawn when it leaks, and the provider says so
+ * by no longer publishing it: a key set kept past `ttlMs` is fetched again
+ * before it verifies anything, so a withdrawn key stops being trusted within
+ * that time and not at the next restart.
  */
 
 import {
 	E_TRANSIT_DISCOVERY_FAILED,
+	E_TRANSIT_INSECURE_ISSUER,
 	E_TRANSIT_INVALID_DISCOVERY,
 	E_TRANSIT_JWKS_FAILED,
 	E_TRANSIT_UNKNOWN_SIGNING_KEY,
@@ -31,7 +37,11 @@ export interface OidcMetadata {
 }
 
 export interface RemoteOptions {
-	/** How long a fetched document is trusted, in milliseconds. Default 1 hour. */
+	/**
+	 * How long a fetched document is trusted, in milliseconds: the discovery
+	 * document, and the key set. Default 1 hour. It is also the longest a key
+	 * the provider has withdrawn keeps verifying tokens.
+	 */
 	ttlMs?: number;
 	/** Shortest interval between two key refetches. Default 5 minutes. */
 	minRefetchMs?: number;
@@ -41,6 +51,30 @@ export interface RemoteOptions {
 
 const DEFAULT_TTL_MS = 3_600_000;
 const DEFAULT_MIN_REFETCH_MS = 300_000;
+
+/** `http://localhost`: a development machine talking to itself. */
+function isLocalHttp(url: URL): boolean {
+	return url.protocol === "http:" && url.hostname === "localhost";
+}
+
+/**
+ * Refuse an issuer that is not reached over TLS.
+ *
+ * Everything a sign-in trusts is fetched from it: the endpoints, then the
+ * keys the id_token is verified against. Over plain HTTP whoever sits on the
+ * path answers those requests, publishes a key of their own and signs a token
+ * for any user — and the client secret travels to them with the code. The
+ * issuer "MUST use the https scheme" (OpenID Connect Discovery, section 3).
+ *
+ * `http://localhost` is the one exception, so a provider run on a laptop
+ * works; it is named so nobody has to guess whether it applies in production.
+ */
+function assertSecureIssuer(issuer: string): void {
+	const url = URL.canParse(issuer) ? new URL(issuer) : undefined;
+	if (url === undefined || (url.protocol !== "https:" && !isLocalHttp(url))) {
+		throw new E_TRANSIT_INSECURE_ISSUER([issuer]);
+	}
+}
 
 /**
  * Reads and caches `/.well-known/openid-configuration`.
@@ -58,6 +92,7 @@ export class OidcDiscovery {
 	#inFlight: Promise<OidcMetadata> | undefined;
 
 	constructor(issuer: string, options: RemoteOptions = {}) {
+		assertSecureIssuer(issuer);
 		// Kept byte for byte: the discovery document's `issuer` and every
 		// id_token's `iss` must be IDENTICAL to it (OpenID Connect Discovery
 		// §4.3), and some providers' issuers end with a slash (Auth0's do).
@@ -111,13 +146,16 @@ export class OidcDiscovery {
  * look again.
  */
 export class JwksCache {
+	readonly #ttlMs: number;
 	readonly #minRefetchMs: number;
 	readonly #now: () => number;
 	#keys: Jwk[] = [];
-	#fetchedAt = 0;
+	/** Where the held keys came from, and when. Undefined until a fetch held. */
+	#fetched: { uri: string; at: number } | undefined;
 	#inFlight: Promise<Jwk[]> | undefined;
 
 	constructor(options: RemoteOptions = {}) {
+		this.#ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
 		this.#minRefetchMs = options.minRefetchMs ?? DEFAULT_MIN_REFETCH_MS;
 		this.#now = options.now ?? Date.now;
 	}
@@ -125,19 +163,26 @@ export class JwksCache {
 	/**
 	 * The key a token names.
 	 *
-	 * A `kid` that is not held triggers at most one refetch per interval — that
-	 * is how a rotated key is picked up, and how a stream of tokens naming
-	 * invented keys stays cheap.
+	 * A held key answers only while the set it came from is younger than
+	 * `ttlMs`. Past that the set is fetched again first, whatever the `kid`:
+	 * a provider withdraws a key by no longer publishing it, and a set that
+	 * still holds every key the tokens name would otherwise never be asked
+	 * for again. When that fetch fails nothing is answered — a set past its
+	 * age is not trusted for being the only one at hand.
+	 *
+	 * Within that time, a `kid` that is not held triggers at most one refetch
+	 * per interval — that is how a rotated key is picked up, and how a stream
+	 * of tokens naming invented keys stays cheap.
 	 */
 	async key(uri: string, kid: string | undefined): Promise<Jwk> {
-		const found = this.#find(kid);
-		if (found) return found;
+		const age = this.#age(uri);
+		if (age !== undefined && age < this.#ttlMs) {
+			const found = this.#find(kid);
+			if (found) return found;
 
-		if (
-			this.#keys.length > 0 &&
-			this.#now() - this.#fetchedAt < this.#minRefetchMs
-		) {
-			throw new E_TRANSIT_UNKNOWN_SIGNING_KEY([kid ?? "no kid"]);
+			if (this.#keys.length > 0 && age < this.#minRefetchMs) {
+				throw new E_TRANSIT_UNKNOWN_SIGNING_KEY([kid ?? "no kid"]);
+			}
 		}
 
 		await this.#fetchKeys(uri);
@@ -146,6 +191,19 @@ export class JwksCache {
 			throw new E_TRANSIT_UNKNOWN_SIGNING_KEY([kid ?? "no kid"]);
 		}
 		return refreshed;
+	}
+
+	/**
+	 * How old the held set is, in milliseconds — or undefined when there is
+	 * none to trust: nothing was fetched, it was fetched from another address
+	 * than the one asked for, or the clock went backwards, in which case its
+	 * age is unknown and it is fetched again.
+	 */
+	#age(uri: string): number | undefined {
+		const fetched = this.#fetched;
+		if (fetched === undefined || fetched.uri !== uri) return undefined;
+		const age = this.#now() - fetched.at;
+		return age >= 0 ? age : undefined;
 	}
 
 	#find(kid: string | undefined): Jwk | undefined {
@@ -180,7 +238,7 @@ export class JwksCache {
 			]);
 		}
 		this.#keys = keys.filter(isJwk);
-		this.#fetchedAt = this.#now();
+		this.#fetched = { uri, at: this.#now() };
 		return this.#keys;
 	}
 }
@@ -216,6 +274,29 @@ function assertMetadata(
 		]);
 	}
 	const userinfo = body.userinfo_endpoint;
+	// The document is only where the endpoints are SAID to be. An https
+	// issuer that points one of them at plain HTTP has downgraded the part
+	// of the sign-in that goes there: the keys, the code and the client
+	// secret, or the browser itself. Only an issuer that is itself
+	// `http://localhost` may name endpoints there.
+	const localIssuer = isLocalHttp(new URL(expectedIssuer));
+	for (const [field, value] of [
+		["authorization_endpoint", authorizationEndpoint],
+		["token_endpoint", tokenEndpoint],
+		["jwks_uri", jwksUri],
+		["userinfo_endpoint", userinfo],
+	]) {
+		if (typeof value !== "string" || value === "") continue;
+		const url = URL.canParse(value) ? new URL(value) : undefined;
+		if (
+			url === undefined ||
+			(url.protocol !== "https:" && !(localIssuer && isLocalHttp(url)))
+		) {
+			throw new E_TRANSIT_INVALID_DISCOVERY([
+				`[transit] the discovery document of '${expectedIssuer}' gives a ${field} that is not an https URL`,
+			]);
+		}
+	}
 	const algs = stringList(body.id_token_signing_alg_values_supported);
 	const challenges = stringList(body.code_challenge_methods_supported);
 	return {

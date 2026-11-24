@@ -29,6 +29,7 @@ import {
 	assertResponseSucceeded,
 	type SamlIdentity,
 	validateAssertion,
+	validateResponse,
 } from "../saml.js";
 import type {
 	EmailVerificationState,
@@ -237,17 +238,25 @@ export class SamlDriver implements TransitDriver {
 			]);
 		}
 
-		// Read from the unsigned document exactly once, and only this: a refusal
-		// arrives unsigned when the assertion is what carries the signature, and
-		// it exists to be reported rather than trusted. Flipping it the other
-		// way cannot produce an assertion that verifies.
+		// Read from the document before its signature is checked, and only
+		// this: a refusal arrives unsigned when the assertion is what carries
+		// the signature, and it exists to be reported rather than trusted.
+		// Flipping it the other way cannot produce an assertion that verifies.
 		assertResponseSucceeded(document);
 
-		// From here on, only what the signature covers.
+		// From here on, only what the signature covers: the assertion is taken
+		// by the identity of the signed node, and the response's own envelope
+		// is checked against it.
 		const signed = verifyXmlSignature(document, {
 			certificates: this.#config.certificates,
 		});
-		const assertion = assertionInside(signed);
+		const assertion = assertionInside(signed, document);
+		validateResponse(document, {
+			issuer: this.#config.issuer,
+			destination: this.#config.callbackUrl,
+			inResponseTo: secret,
+			signed: signed === document,
+		});
 
 		const identity = validateAssertion(assertion, {
 			issuer: this.#config.issuer,
